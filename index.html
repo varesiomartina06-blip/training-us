@@ -19,8 +19,8 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main id="app" aria-live="polite">
-    <!-- Logo: dos anillos entrelazados -->
+  <!-- ===== Acceso ===== -->
+  <main id="acceso" class="acceso" hidden>
     <svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
       <g class="anillo anillo-rosa"><circle cx="38.2" cy="50" r="22.5"/></g>
       <g class="anillo anillo-azul"><circle cx="61.8" cy="50" r="22.5"/></g>
@@ -28,7 +28,6 @@
     </svg>
     <h1 class="marca">training.us</h1>
 
-    <!-- Paso 1: correo -->
     <section id="paso-correo" class="panel" hidden>
       <p class="intro">Su espacio para entrenar, cuidarse y cumplir juntos.</p>
       <form id="form-correo" novalidate>
@@ -38,7 +37,6 @@
       </form>
     </section>
 
-    <!-- Paso 2: código -->
     <section id="paso-codigo" class="panel" hidden>
       <p class="intro">Escribe el código que llegó a <strong id="correo-enviado"></strong>.</p>
       <form id="form-codigo" novalidate>
@@ -48,19 +46,19 @@
       </form>
       <button id="otro-correo" class="enlace" type="button">Usar otro correo</button>
     </section>
-
-    <!-- Inicio (provisional, fase 0) -->
-    <section id="inicio" class="panel" hidden>
-      <p class="saludo">Hola, <span id="nombre"></span></p>
-      <ul class="estado">
-        <li id="estado-sesion">Sesión iniciada</li>
-        <li id="estado-instalacion"></li>
-      </ul>
-      <button id="cerrar-sesion" class="secundario" type="button">Cerrar sesión</button>
-    </section>
-
-    <p id="mensaje" class="mensaje" role="alert" hidden></p>
   </main>
+
+  <!-- ===== App ===== -->
+  <div id="app" hidden>
+    <main id="vista" class="vista" aria-live="polite"></main>
+    <nav id="pestanas" class="pestanas" aria-label="Secciones" hidden>
+      <button type="button" data-vista="inicio"><span aria-hidden="true">🏆</span>Inicio</button>
+      <button type="button" data-vista="metas"><span aria-hidden="true">🎯</span>Metas</button>
+      <button type="button" data-vista="perfil"><span aria-hidden="true">👤</span>Perfil</button>
+    </nav>
+  </div>
+
+  <p id="mensaje" class="mensaje" role="alert" hidden></p>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="config.js"></script>
