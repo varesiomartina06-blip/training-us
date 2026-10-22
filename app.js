@@ -106,7 +106,8 @@
   async function salir() {
     await db.auth.signOut();
     usuario = estado = perfil = null;
-    document.body.className = "";
+    document.body.classList.remove("tema-rosa", "tema-azul");
+    mostrarPestanas(false);
     $("correo").value = "";
     mostrarAcceso("correo");
   }
@@ -137,10 +138,16 @@
     }
     estado = e.data;
     perfil = p.data;
-    document.body.className = perfil.tema ? "tema-" + perfil.tema : "";
+    document.body.classList.remove("tema-rosa", "tema-azul");
+    if (perfil.tema) document.body.classList.add("tema-" + perfil.tema);
     if (!perfil.completado) return vistaPerfil(true);
-    $("pestanas").hidden = false;
+    mostrarPestanas(true);
     irA(vistaActual);
+  }
+
+  function mostrarPestanas(si) {
+    $("pestanas").hidden = !si;
+    document.body.classList.toggle("con-pestanas", si);
   }
 
   const yo = () => estado.participantes.find((x) => x.id === estado.yo);
@@ -164,6 +171,9 @@
   }
 
   // ================================================================ INICIO
+  const ZONAS = { "America/Panama": "Panamá", "Europe/Madrid": "España", "Atlantic/Canary": "Canarias" };
+  const nombreZona = (z) => ZONAS[z] || z.split("/").pop().replace(/_/g, " ");
+
   function tarjetaParticipante(p, esYo) {
     const tema = p.tema || "";
     const nombre = esc(p.nombre || "Sin nombre todavía");
@@ -171,7 +181,7 @@
     const sem = p.meta_semana;
     const dias = sem ? DIAS.map((d, i) =>
       `<span class="dia ${sem.dias_previstos.includes(i + 1) ? "on" : ""}" aria-label="${d}">${d}</span>`).join("") : "";
-    const zonaTxt = p.zona.replace(/_/g, " ").split("/").pop();
+    const zonaTxt = nombreZona(p.zona);
     return `
       <section class="tarjeta ${tema}">
         <h3 class="nombre-${tema}">${nombre}${esYo ? " (tú)" : ""}</h3>
@@ -179,7 +189,7 @@
         ${sem ? `<div class="dias">${dias}</div>` : `<p>Sin días previstos esta semana</p>`}
         <p>Hora de ${esc(zonaTxt)}</p>
         ${!p.completado ? `<p>Aún no ha completado su perfil.</p>` : ""}
-        ${p.zona_pendiente ? `<div class="aviso">Cambio a hora de ${esc(p.zona_pendiente.zona.split("/").pop().replace(/_/g, " "))} desde el ${fechaCorta(p.zona_pendiente.desde)}.</div>` : ""}
+        ${p.zona_pendiente ? `<div class="aviso">Cambio a hora de ${esc(nombreZona(p.zona_pendiente.zona))} desde el ${fechaCorta(p.zona_pendiente.desde)}.</div>` : ""}
       </section>`;
   }
 
@@ -234,7 +244,7 @@
 
   // ================================================================ PERFIL
   function vistaPerfil(esPrimeraVez) {
-    $("pestanas").hidden = esPrimeraVez;
+    mostrarPestanas(!esPrimeraVez);
     const temaDefecto = perfil.tema || cfg.usuarios?.[perfil.email]?.tema || "rosa";
     const v = (x) => esc(x ?? "");
     $("vista").innerHTML = `
@@ -243,29 +253,26 @@
       <form id="form-perfil" class="tarjeta" novalidate>
         <div class="campo"><label for="pf-nombre">Nombre o apodo</label>
           <input id="pf-nombre" maxlength="40" required value="${v(perfil.nombre)}"></div>
-        <div class="fila campo">
-          <div><label for="pf-nac">Fecha de nacimiento</label><input id="pf-nac" type="date" required value="${v(perfil.fecha_nacimiento)}"></div>
-          <div><label for="pf-sexo">Sexo</label>
-            <select id="pf-sexo" required>
-              <option value="">Elegir</option>
-              <option value="femenino" ${perfil.sexo === "femenino" ? "selected" : ""}>Femenino</option>
-              <option value="masculino" ${perfil.sexo === "masculino" ? "selected" : ""}>Masculino</option>
-              <option value="otro" ${perfil.sexo === "otro" ? "selected" : ""}>Otro</option>
-            </select></div>
-        </div>
+        <div class="campo"><label for="pf-nac">Fecha de nacimiento</label>
+          <input id="pf-nac" type="date" required value="${v(perfil.fecha_nacimiento)}"></div>
+        <div class="campo"><span class="grupo-titulo">Sexo</span>
+          <div class="opciones">
+            ${[["femenino", "Femenino"], ["masculino", "Masculino"], ["otro", "Otro"]].map(([k, t]) =>
+              `<label><input type="radio" name="pf-sexo" value="${k}" ${perfil.sexo === k ? "checked" : ""}><span>${t}</span></label>`).join("")}
+          </div></div>
         <div class="fila campo">
           <div><label for="pf-estatura">Estatura (cm)</label><input id="pf-estatura" type="number" inputmode="decimal" min="100" max="250" step="0.1" required value="${v(perfil.estatura_cm)}"></div>
           ${esPrimeraVez ? `<div><label for="pf-peso">Peso inicial (kg)</label><input id="pf-peso" type="number" inputmode="decimal" min="30" max="300" step="0.1" required></div>` : "<div></div>"}
         </div>
-        ${esPrimeraVez ? `<p class="privado">🔒 El peso es privado: solo tú lo ves.</p>` : ""}
+        ${esPrimeraVez ? `<p class="privado" style="margin:-6px 0 20px">🔒 El peso es privado: solo tú lo ves.</p>` : ""}
         <div class="campo"><label for="pf-objetivo">Tu objetivo físico</label>
           <textarea id="pf-objetivo" maxlength="300" placeholder="Con tus palabras: qué quieres lograr">${v(perfil.objetivo_fisico)}</textarea></div>
         <span class="grupo-titulo">Tu color en la app</span>
-        <div class="opciones">
+        <div class="opciones campo">
           <label class="op-rosa"><input type="radio" name="pf-tema" value="rosa" ${temaDefecto === "rosa" ? "checked" : ""}><span>Rosa</span></label>
           <label class="op-azul"><input type="radio" name="pf-tema" value="azul" ${temaDefecto === "azul" ? "checked" : ""}><span>Azul</span></label>
         </div>
-        <button type="submit">${esPrimeraVez ? "Guardar y continuar" : "Guardar cambios"}</button>
+        <button type="submit" class="boton-principal">${esPrimeraVez ? "Guardar y continuar" : "Guardar cambios"}</button>
         ${esPrimeraVez ? "" : `<button type="button" id="btn-salir" class="secundario">Cerrar sesión</button>`}
       </form>`;
 
@@ -275,7 +282,7 @@
       const datos = {
         nombre: $("pf-nombre").value.trim(),
         fecha_nacimiento: $("pf-nac").value || null,
-        sexo: $("pf-sexo").value || null,
+        sexo: document.querySelector('input[name="pf-sexo"]:checked')?.value || null,
         estatura_cm: $("pf-estatura").value ? Number($("pf-estatura").value) : null,
         objetivo_fisico: $("pf-objetivo").value.trim() || null,
         tema: document.querySelector('input[name="pf-tema"]:checked')?.value || null,
@@ -323,7 +330,7 @@
         <h3>Metas del mes</h3>
         <p>Se aplican desde la primera semana que pertenece al mes.</p>
         <label class="grupo-titulo" for="mm-mes" style="margin-top:16px">Mes</label>
-        <select id="mm-mes">${meses.map((m) => `<option value="${m}">${nombreMes(m)}</option>`).join("")}</select>
+        <select id="mm-mes" class="campo">${meses.map((m) => `<option value="${m}">${nombreMes(m)}</option>`).join("")}</select>
         <div id="mm-form"></div>
       </section>
 
@@ -331,7 +338,7 @@
         <h3>Metas de la semana</h3>
         <p>Días previstos de entrenamiento y horarios de sueño. Se configuran cada domingo para la semana siguiente.</p>
         <label class="grupo-titulo" for="ms-semana" style="margin-top:16px">Semana</label>
-        <select id="ms-semana">${semanas.map((s) => `<option value="${s}">Semana del ${fechaCorta(s)} (${fmt(mesMeta(s), { month: "long" })})</option>`).join("")}</select>
+        <select id="ms-semana" class="campo">${semanas.map((s) => `<option value="${s}">Semana del ${fechaCorta(s)} (${fmt(mesMeta(s), { month: "long" })})</option>`).join("")}</select>
         <div id="ms-form"></div>
       </section>`;
 
@@ -364,18 +371,20 @@
         <output id="mm-entrenos">${entrenos}</output>
         <button type="button" id="mm-mas" aria-label="Uno más">+</button>
       </div>
-      <div class="fila campo">
-        <div><label for="mm-libres">Comidas libres del mes</label><input id="mm-libres" type="number" inputmode="numeric" min="0" max="31" value="${base?.comidas_libres ?? 0}"></div>
-        <div><label for="mm-alcohol">Límite de bebidas por semana</label><input id="mm-alcohol" type="number" inputmode="numeric" min="0" max="50" placeholder="Sin límite" value="${base?.alcohol_bebidas_semana ?? ""}"></div>
+      <div class="fila">
+        <div><label for="mm-libres">Comidas libres al mes</label><input id="mm-libres" type="number" inputmode="numeric" min="0" max="31" value="${base?.comidas_libres ?? 0}"></div>
+        <div><label for="mm-alcohol">Bebidas por semana</label><input id="mm-alcohol" type="number" inputmode="numeric" min="0" max="50" placeholder="Sin límite" value="${base?.alcohol_bebidas_semana ?? ""}"></div>
       </div>
+      <p class="ayuda">Deja las bebidas vacías si no quieres límite.</p>
       <hr class="separador">
       <span class="grupo-titulo">Objetivos diarios de nutrición</span>
-      <p class="privado" style="margin:0 0 14px">🔒 Privados: solo tú los ves.</p>
+      <p class="privado">🔒 Privados: solo tú los ves.</p>
       ${NUTRIENTES.map(([k, nom, u]) => {
         const x = nutri[k];
         const tipo = x?.tipo || "";
         return `
         <div class="nutri" data-nutriente="${k}">
+          <div class="cabecera-nutri">
           <span class="nombre-nutri">${nom} (${u})</span>
           <select aria-label="Tipo de objetivo de ${nom}">
             <option value="" ${!tipo ? "selected" : ""}>Sin objetivo</option>
@@ -383,13 +392,14 @@
             <option value="maximo" ${tipo === "maximo" ? "selected" : ""}>Máximo</option>
             <option value="rango" ${tipo === "rango" ? "selected" : ""}>Rango</option>
           </select>
+          </div>
           <div class="valores">
             <input class="v-min" type="number" inputmode="decimal" min="0" placeholder="Mínimo" aria-label="${nom} mínimo" value="${x?.valor_min ?? ""}">
             <input class="v-max" type="number" inputmode="decimal" min="0" placeholder="Máximo" aria-label="${nom} máximo" value="${x?.valor_max ?? ""}">
           </div>
         </div>`;
       }).join("")}
-      <button type="button" id="mm-guardar">Guardar metas de ${nombreMes(mes)}</button>`;
+      <button type="button" id="mm-guardar" class="boton-principal">Guardar metas de ${nombreMes(mes)}</button>`;
 
     const pintarValores = () => cont.querySelectorAll(".nutri").forEach((f) => {
       const t = f.querySelector("select").value;
@@ -458,13 +468,13 @@
       <div class="selector-dias" role="group" aria-label="Días previstos">
         ${DIAS.map((d, i) => `<button type="button" data-dia="${i + 1}" aria-pressed="${dias.has(i + 1)}">${d}</button>`).join("")}
       </div>
-      <p class="ayuda" id="ms-ayuda-dias" style="margin:6px 0 20px"></p>
+      <p class="ayuda" id="ms-ayuda-dias" style="margin:8px 0 22px"></p>
 
       <span class="grupo-titulo">Horarios de sueño</span>
-      <p class="ayuda" style="margin:0 0 12px">Al elegir una hora, sugerimos la otra para completar 8 horas. Cada par debe sumar entre 6 y 10 horas.</p>
-      ${parSueno("Noches de domingo a jueves", "😴 Dormir", "ms-ds", "⏰ Despertar (lun–vie)", "ms-ws", hhmm(base?.dormir_semana), hhmm(base?.despertar_semana))}
-      ${parSueno("Noches de viernes y sábado", "😴 Dormir", "ms-df", "⏰ Despertar (sáb–dom)", "ms-wf", hhmm(base?.dormir_finde), hhmm(base?.despertar_finde))}
-      <button type="button" id="ms-guardar">Guardar semana del ${fechaCorta(semana)}</button>`;
+      <p class="ayuda" style="margin:-2px 0 12px">Al elegir una hora, sugerimos la otra para completar 8 horas. Cada par debe sumar entre 6 y 10 horas.</p>
+      ${parSueno("Noches de domingo a jueves", "Despiertas de lunes a viernes", "ms-ds", "ms-ws", hhmm(base?.dormir_semana), hhmm(base?.despertar_semana))}
+      ${parSueno("Noches de viernes y sábado", "Despiertas sábado y domingo", "ms-df", "ms-wf", hhmm(base?.dormir_finde), hhmm(base?.despertar_finde))}
+      <button type="button" id="ms-guardar" class="boton-principal">Guardar semana del ${fechaCorta(semana)}</button>`;
 
     const ayudaDias = () => {
       const ok = dias.size >= meta;
@@ -529,17 +539,23 @@
     };
   }
 
-  function parSueno(titulo, l1, id1, l2, id2, v1, v2) {
+  function parSueno(titulo, detalle, id1, id2, v1, v2) {
     return `
       <div class="par-sueno">
         <span class="grupo-titulo">${titulo}</span>
+        <p class="ayuda" style="margin:-6px 0 12px">${detalle}</p>
         <div class="fila">
-          <div><label for="${id1}">${l1}</label><input id="${id1}" type="time" value="${v1}"></div>
-          <div><label for="${id2}">${l2}</label><input id="${id2}" type="time" value="${v2}"></div>
+          <div><label for="${id1}">😴 Dormir</label><input id="${id1}" type="time" value="${v1}"></div>
+          <div><label for="${id2}">⏰ Despertar</label><input id="${id2}" type="time" value="${v2}"></div>
         </div>
         <p class="duracion" id="${id1}-dur"></p>
       </div>`;
   }
+
+  // ================================================================ SENSACIÓN DE APP NATIVA
+  ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+  document.addEventListener("touchmove", (e) => { if (e.scale && e.scale !== 1) e.preventDefault(); }, { passive: false });
 
   // ================================================================ ARRANQUE
   db.auth.getSession().then(({ data }) => {
