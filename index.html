@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>training.us</title>
+  <meta name="theme-color" content="#F6EDE8">
+  <meta name="color-scheme" content="light">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="training.us">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="app" aria-live="polite">
+    <!-- Logo: dos anillos entrelazados -->
+    <svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
+      <g class="anillo anillo-rosa"><circle cx="38.2" cy="50" r="22.5"/></g>
+      <g class="anillo anillo-azul"><circle cx="61.8" cy="50" r="22.5"/></g>
+      <g class="anillo anillo-rosa"><path d="M42.11 27.84 A22.5 22.5 0 0 1 55.93 36.15"/></g>
+    </svg>
+    <h1 class="marca">training.us</h1>
+
+    <!-- Paso 1: correo -->
+    <section id="paso-correo" class="panel" hidden>
+      <p class="intro">Su espacio para entrenar, cuidarse y cumplir juntos.</p>
+      <form id="form-correo" novalidate>
+        <label for="correo">Tu correo</label>
+        <input id="correo" type="email" inputmode="email" autocomplete="email" autocapitalize="off" required>
+        <button type="submit">Enviarme un código</button>
+      </form>
+    </section>
+
+    <!-- Paso 2: código -->
+    <section id="paso-codigo" class="panel" hidden>
+      <p class="intro">Escribe el código que llegó a <strong id="correo-enviado"></strong>.</p>
+      <form id="form-codigo" novalidate>
+        <label for="codigo">Código</label>
+        <input id="codigo" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" required>
+        <button type="submit">Entrar</button>
+      </form>
+      <button id="otro-correo" class="enlace" type="button">Usar otro correo</button>
+    </section>
+
+    <!-- Inicio (provisional, fase 0) -->
+    <section id="inicio" class="panel" hidden>
+      <p class="saludo">Hola, <span id="nombre"></span></p>
+      <ul class="estado">
+        <li id="estado-sesion">Sesión iniciada</li>
+        <li id="estado-instalacion"></li>
+      </ul>
+      <button id="cerrar-sesion" class="secundario" type="button">Cerrar sesión</button>
+    </section>
+
+    <p id="mensaje" class="mensaje" role="alert" hidden></p>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
