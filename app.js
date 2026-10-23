@@ -224,17 +224,109 @@
     return `<section class="tarjeta"><h3>Juntos hoy</h3>${cuerpo}</section>`;
   }
 
-  function vistaInicio() {
+  async function vistaInicio() {
     const p = pareja();
-    const inicio = estado.fecha_inicio ? `El desafío empieza el ${fmt(estado.fecha_inicio, { day: "numeric", month: "long" })}.` : "La fecha de inicio del desafío está por definir.";
     $("vista").innerHTML = `
       <h2 class="titulo">Hola, ${esc(perfil.nombre)}</h2>
-      <p class="sub">${inicio} El marcador de la competencia aparecerá aquí en la fase 3.</p>
+      <div id="marcador"><section class="tarjeta"><p class="vacio">Cargando marcador…</p></section></div>
       ${tarjetaParticipante(yo(), true)}
       ${p ? tarjetaParticipante(p, false) : ""}
       <div id="inicio-pendientes"></div>
       ${tarjetaJuntos()}`;
     cargarPendientesJuntos($("inicio-pendientes"));
+    const { data, error } = await db.rpc("marcador");
+    if (error || !data) { $("marcador").innerHTML = ""; return avisar("No se pudo cargar el marcador: " + errorLegible(error) + ". ¿Ejecutaste fase3.sql?"); }
+    if (vistaActual === "inicio") $("marcador").innerHTML = htmlMarcador(data);
+  }
+
+  // ================================================================ MARCADOR (fase 3)
+  const pct = (a, b) => (b > 0 ? Math.round((100 * a) / b) : 100);
+  function htmlMarcador(m) {
+    const [a, b] = m.participantes;
+    const pa = estado.participantes.find((x) => x.id === a.id);
+    const pb = b ? estado.participantes.find((x) => x.id === b.id) : null;
+    const nom = (x) => esc(x?.nombre || "—");
+    const tema = (x) => x?.tema || "";
+    const dif = b ? a.total - b.total : 0;
+    let lider = "";
+    if (b && m.activo) lider = dif === 0 ? "Van empatados" : `${nom(dif > 0 ? pa : pb)} va ganando por ${Math.abs(dif)} punto${Math.abs(dif) === 1 ? "" : "s"}`;
+    const corona = (x, y) => m.activo && b && x.total > y.total ? `<span class="corona" aria-label="Va ganando">👑</span>` : "";
+    const inicio = m.fecha_inicio ? fmt(m.fecha_inicio, { day: "numeric", month: "long" }) : null;
+
+    const lado = (x, px, y) => {
+      const s = x.semana;
+      return `
+      <div class="lado-marcador ${tema(px)}">
+        ${corona(x, y || x)}
+        <span class="nombre-marcador">${nom(px)}</span>
+        <span class="puntos-total">${m.activo ? x.total : 0}</span>
+        <span class="puntos-etiqueta">puntos</span>
+        <span class="puntos-semana">${s ? `+${s.puntos_ganados} esta semana` : "Sin metas"}</span>
+      </div>`;
+    };
+
+    const fila = (etiqueta, fn) => `<div class="fila-stat"><span>${etiqueta}</span><strong class="${tema(pa)}">${fn(a)}</strong>${b ? `<strong class="${tema(pb)}">${fn(b)}</strong>` : ""}</div>`;
+    const semanaTxt = (x) => {
+      const s = x.semana; if (!s) return "—";
+      const faltan = s.meta_efectiva - s.obligatorios;
+      return `${s.obligatorios}/${s.meta_efectiva}${faltan > 0 ? ` <small>faltan ${faltan}</small>` : " ✓"}`;
+    };
+    const mesTxt = (x) => {
+      const s = x.semana || { obligatorios: 0, meta_efectiva: 0 };
+      return pct(x.mes.obligatorios + s.obligatorios, x.mes.meta + s.meta_efectiva) + " %";
+    };
+    const r = (x, k) => x.rachas[k] + (x.rachas[k + "_max"] > x.rachas[k] ? ` <small>máx. ${x.rachas[k + "_max"]}</small>` : "");
+
+    return `
+      <section class="tarjeta marcador">
+        ${m.activo ? "" : `<p class="aviso" style="margin:0 0 14px">Vista previa: ${inicio ? `el desafío empieza el ${inicio}` : "la fecha de inicio está por definir"}. Los puntos se acumulan desde ese día; mientras tanto ves cómo va tu semana.</p>`}
+        <div class="marcador-cols">
+          ${lado(a, pa, b)}
+          ${b ? `<span class="vs">vs</span>${lado(b, pb, a)}` : ""}
+        </div>
+        ${lider ? `<p class="lider">${lider}</p>` : ""}
+      </section>
+
+      <section class="tarjeta">
+        <div class="fila-stat cabecera"><span></span><strong class="${tema(pa)}">${nom(pa)}</strong>${b ? `<strong class="${tema(pb)}">${nom(pb)}</strong>` : ""}</div>
+        ${fila("Esta semana", semanaTxt)}
+        ${fila("Cumplimiento del mes", mesTxt)}
+        ${fila("🔥 Racha semanal", (x) => r(x, "semanal"))}
+        ${fila("📅 Racha diaria", (x) => r(x, "diaria"))}
+        ${fila("🏅 Meses perfectos seguidos", (x) => r(x, "mensual"))}
+        ${fila("Adicionales este mes", (x) => x.mes.extras + (x.semana?.extras || 0))}
+        ${fila("Faltas este mes", (x) => x.mes.faltas)}
+        ${fila("💰 Multas", () => "<small>fase 5</small>")}
+      </section>
+
+      <section class="tarjeta">
+        <h3>Evolución semanal</h3>
+        ${graficoEvolucion(a, b, pa, pb)}
+      </section>`;
+  }
+
+  function graficoEvolucion(a, b, pa, pb) {
+    const series = [a, b].filter(Boolean).map((x) => x.historial);
+    if (!series.some((h) => h.length)) return `<p>Aparecerá cuando se cierre la primera semana del desafío.</p>`;
+    const semanas = [...new Set(series.flat().map((h) => h.semana))].sort();
+    const valores = series.flat().map((h) => h.puntos);
+    const max = Math.max(10, ...valores), min = Math.min(0, ...valores);
+    const W = 320, H = 150, px = 28, py = 16;
+    const xPos = (i) => px + (semanas.length === 1 ? (W - 2 * px) / 2 : (i * (W - 2 * px)) / (semanas.length - 1));
+    const yPos = (v) => H - py - ((v - min) / (max - min)) * (H - 2 * py);
+    const color = (p) => (p?.tema === "azul" ? "var(--azul-fuerte)" : "var(--rosa-fuerte)");
+    const linea = (h, p) => {
+      const pts = h.map((x) => [xPos(semanas.indexOf(x.semana)), yPos(x.puntos)]);
+      return `<polyline fill="none" stroke="${color(p)}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${pts.map((q) => q.join(",")).join(" ")}"/>` +
+        pts.map((q) => `<circle cx="${q[0]}" cy="${q[1]}" r="4" fill="${color(p)}"/>`).join("");
+    };
+    return `
+      <svg viewBox="0 0 ${W} ${H + 18}" class="grafico" role="img" aria-label="Puntos por semana">
+        <line x1="${px}" x2="${W - px}" y1="${yPos(0)}" y2="${yPos(0)}" stroke="var(--borde)" stroke-width="1"/>
+        ${linea(a.historial, pa)}${b ? linea(b.historial, pb) : ""}
+        ${semanas.map((s, i) => `<text x="${xPos(i)}" y="${H + 12}" text-anchor="middle" font-size="10" fill="var(--texto-suave)">${fechaCorta(s)}</text>`).join("")}
+      </svg>
+      <div class="leyenda"><span><i style="background:${color(pa)}"></i>${esc(pa?.nombre || "")}</span>${b ? `<span><i style="background:${color(pb)}"></i>${esc(pb?.nombre || "")}</span>` : ""}</div>`;
   }
 
   $("vista").addEventListener("click", async (e) => {

@@ -297,3 +297,26 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .galeria { display: grid; gap: 10px; margin: 12px 0; }
 .galeria img { width: 100%; border-radius: 16px; background: var(--superficie); }
 .etiqueta-aviso { background: #FFF4D9; color: #6B5212; }
+
+/* ===================== Fase 3: marcador ===================== */
+.marcador { padding: 20px 14px; }
+.marcador-cols { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 6px; }
+.lado-marcador { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 14px 6px; border-radius: 18px; }
+.lado-marcador.rosa { background: var(--rosa-suave); color: var(--rosa-fuerte); }
+.lado-marcador.azul { background: var(--azul-suave); color: var(--azul-fuerte); }
+.nombre-marcador { font-weight: 700; font-size: 1rem; }
+.puntos-total { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.puntos-etiqueta { font-size: .78rem; font-weight: 600; opacity: .8; }
+.puntos-semana { font-size: .8rem; margin-top: 8px; color: var(--texto-suave); }
+.corona { position: absolute; top: -12px; font-size: 1.4rem; }
+.vs { font-weight: 700; color: var(--texto-suave); font-size: .9rem; }
+.lider { text-align: center; font-weight: 600; margin: 14px 0 0 !important; color: var(--texto) !important; }
+.fila-stat { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr); gap: 8px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--borde); font-size: .92rem; }
+.fila-stat:last-child { border-bottom: 0; }
+.fila-stat span { color: var(--texto-suave); }
+.fila-stat strong { text-align: center; font-variant-numeric: tabular-nums; }
+.fila-stat strong.rosa { color: var(--rosa-fuerte); }
+.fila-stat strong.azul { color: var(--azul-fuerte); }
+.fila-stat small { display: block; font-size: .72rem; font-weight: 500; color: var(--texto-suave); }
+.fila-stat.cabecera { padding-top: 0; }
+.grafico { width: 100%; height: auto; margin-top: 10px; overflow: visible; }
