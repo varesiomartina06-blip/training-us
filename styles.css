@@ -320,3 +320,12 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .fila-stat small { display: block; font-size: .72rem; font-weight: 500; color: var(--texto-suave); }
 .fila-stat.cabecera { padding-top: 0; }
 .grafico { width: 100%; height: auto; margin-top: 10px; overflow: visible; }
+
+/* ===================== Fase 4: excepciones ===================== */
+.dia.excusado { background: #FFF4D9; font-size: 1rem; }
+.botones-lista { display: grid; gap: 8px; margin-top: 14px; }
+.botones-lista button.secundario { margin: 0; text-align: left; padding: 0 16px; }
+.tarjeta.pendiente { border-color: #E9C46A; box-shadow: inset 5px 0 0 #E9C46A; padding-left: 22px; }
+.cupos { display: grid; gap: 6px; background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; padding: 12px 14px; font-size: .92rem; color: var(--texto-suave); }
+.cupos strong { color: var(--texto); }
+.tarjeta > p small, .tarjeta p small { color: var(--texto-suave); font-size: .82rem; }

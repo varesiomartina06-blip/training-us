@@ -161,13 +161,15 @@
   });
   function irA(v) {
     vistaActual = v;
+    const pestana = v === "ausencias" ? "entrenar" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
-      if (b.dataset.vista === v) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+      if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
     window.scrollTo(0, 0);
     if (!$("hoja").hidden) cerrarHoja();
     if (v === "inicio") vistaInicio();
     else if (v === "entrenar") vistaEntrenar();
+    else if (v === "ausencias") vistaAusencias();
     else if (v === "metas") vistaMetas();
     else vistaPerfil(false);
   }
@@ -182,19 +184,27 @@
     const meta = p.meta_mes;
     const sem = p.meta_semana;
     const hechos = p.dias_entrenados || [];
+    const plan = p.plan || sem?.dias_previstos || [];
+    const excusas = p.excusas || {};
     const dias = DIAS.map((d, i) => {
-      const prev = sem?.dias_previstos.includes(i + 1), hecho = hechos.includes(i + 1);
-      return `<span class="dia ${prev ? "on" : ""} ${hecho ? "hecho" : ""} ${hecho && !prev ? "extra" : ""}" aria-label="${d}${hecho ? ", entrenado" : prev ? ", previsto" : ""}">${hecho ? "✓" : d}</span>`;
+      const n = i + 1, prev = plan.includes(n), hecho = hechos.includes(n), exc = excusas[n];
+      const marca = hecho ? "✓" : exc ? MOTIVOS[exc]?.[0] || "•" : d;
+      return `<span class="dia ${prev ? "on" : ""} ${hecho ? "hecho" : ""} ${hecho && !prev ? "extra" : ""} ${exc && !hecho ? "excusado" : ""}" aria-label="${d}${hecho ? ", entrenado" : exc ? ", " + (MOTIVOS[exc]?.[1] || "") : prev ? ", previsto" : ""}">${marca}</span>`;
     }).join("");
+    const metaEf = meta ? metaEfectiva(p) : 0;
+    const pz = p.pausa;
+    const sinActualizar = pz?.estado === "activa" && (!pz.ultima_actualizacion || pz.ultima_actualizacion < sumarDias(p.hoy, -2));
     const zonaTxt = nombreZona(p.zona);
     return `
       <section class="tarjeta ${tema}">
         <h3 class="nombre-${tema}">${nombre}${esYo ? " (tú)" : ""}</h3>
-        <p>${meta ? `${Math.min(hechos.length, meta.entrenos_semana)} de ${meta.entrenos_semana} días con entrenamiento esta semana` : "Todavía sin metas del mes"}</p>
+        <p>${meta ? `${Math.min(hechos.length, metaEf)} de ${metaEf} días con entrenamiento esta semana${metaEf < meta.entrenos_semana ? ` <small>(meta ${meta.entrenos_semana}, ${meta.entrenos_semana - metaEf} excusado${meta.entrenos_semana - metaEf === 1 ? "" : "s"})</small>` : ""}` : "Todavía sin metas del mes"}</p>
         <div class="dias">${dias}</div>
         ${sem ? "" : `<p>Sin días previstos esta semana</p>`}
         <p>Hora de ${esc(zonaTxt)}</p>
         ${!p.completado ? `<p>Aún no ha completado su perfil.</p>` : ""}
+        ${pz?.estado === "activa" ? `<div class="aviso">⏸ En pausa por lesión desde el ${fechaCorta(pz.desde)}${sinActualizar ? ". Sin actualizar desde hace días: pendiente de revisión." : "."}</div>` : ""}
+        ${pz?.estado === "solicitada" ? `<div class="aviso">⏸ Pausa por lesión solicitada, esperando respuesta.</div>` : ""}
         ${p.zona_pendiente ? `<div class="aviso">Cambio a hora de ${esc(nombreZona(p.zona_pendiente.zona))} desde el ${fechaCorta(p.zona_pendiente.desde)}.</div>` : ""}
       </section>`;
   }
@@ -228,12 +238,14 @@
     const p = pareja();
     $("vista").innerHTML = `
       <h2 class="titulo">Hola, ${esc(perfil.nombre)}</h2>
+      <div id="por-responder-inicio"></div>
       <div id="marcador"><section class="tarjeta"><p class="vacio">Cargando marcador…</p></section></div>
       ${tarjetaParticipante(yo(), true)}
       ${p ? tarjetaParticipante(p, false) : ""}
       <div id="inicio-pendientes"></div>
       ${tarjetaJuntos()}`;
     cargarPendientesJuntos($("inicio-pendientes"));
+    cargarPorResponder($("por-responder-inicio"));
     const { data, error } = await db.rpc("marcador");
     if (error || !data) { $("marcador").innerHTML = ""; return avisar("No se pudo cargar el marcador: " + errorLegible(error) + ". ¿Ejecutaste fase3.sql?"); }
     if (vistaActual === "inicio") $("marcador").innerHTML = htmlMarcador(data);
@@ -262,6 +274,7 @@
         <span class="puntos-total">${m.activo ? x.total : 0}</span>
         <span class="puntos-etiqueta">puntos</span>
         <span class="puntos-semana">${s ? `+${s.puntos_ganados} esta semana` : "Sin metas"}</span>
+        ${x.total_pausa ? `<span class="puntos-semana">${x.total_pausa} durante pausas</span>` : ""}
       </div>`;
     };
 
@@ -285,6 +298,7 @@
           ${b ? `<span class="vs">vs</span>${lado(b, pb, a)}` : ""}
         </div>
         ${lider ? `<p class="lider">${lider}</p>` : ""}
+        ${(a.semana?.en_pausa) ? `<p class="aviso" style="margin:14px 0 0">⏸ Marcador en pausa por lesión: los puntos de estas semanas se guardan aparte y no cuentan para quién va ganando.</p>` : ""}
       </section>
 
       <section class="tarjeta">
@@ -746,7 +760,7 @@
   let entrenarDe = "yo";
   async function vistaEntrenar() {
     const y = yo(), p = pareja();
-    const meta = y.meta_mes?.entrenos_semana || 0;
+    const meta = y.meta_mes ? metaEfectiva(y) : 0;
     const dias = (y.dias_entrenados || []).length;
     const pct = meta ? Math.min(100, Math.round((dias / meta) * 100)) : 0;
     $("vista").innerHTML = `
@@ -759,6 +773,8 @@
         <p>${textoSemana(y, dias, meta)}</p>
         <button type="button" class="boton-principal" data-accion="registrar" style="margin-top:16px">Registrar entrenamiento</button>
       </section>
+      ${tarjetaCambios()}
+      <div id="por-responder"></div>
       <div id="pendientes-juntos"></div>
       <div class="segmentado" role="group" aria-label="Ver entrenamientos de">
         <button type="button" data-ver="yo" aria-pressed="${entrenarDe === "yo"}">Mi semana</button>
@@ -769,6 +785,7 @@
       <div id="lista-rutinas" class="lista"><p class="vacio">Cargando…</p></div>`;
     cargarListaEntrenos();
     cargarPendientesJuntos($("pendientes-juntos"));
+    cargarPorResponder($("por-responder"));
     cargarRutinas();
   }
 
@@ -777,7 +794,7 @@
     const cont = $("lista-entrenos");
     if (!quien) { cont.innerHTML = ""; return; }
     const { data, error } = await db.from("entrenos")
-      .select("*, evidencias(ruta, miniatura), rutinas_youtube(video_id, titulo)")
+      .select("*, evidencias(ruta, miniatura), rutinas_youtube(video_id, titulo), disputas(estado)")
       .eq("user_id", quien.id).eq("estado", "completado")
       .gte("fecha", quien.semana_actual).lte("fecha", sumarDias(quien.semana_actual, 6))
       .order("fecha", { ascending: false }).order("hora", { ascending: false });
@@ -797,6 +814,7 @@
           ${e.juntos === "confirmado" ? `<span class="etiqueta">💞 Juntos</span>` : e.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : ""}
           ${e.recuperacion ? `<span class="etiqueta">En recuperación</span>` : ""}
           ${e.duracion_min < MIN_VALIDO ? `<span class="etiqueta etiqueta-aviso">No cuenta: menos de ${MIN_VALIDO} min</span>` : ""}
+          ${e.disputas?.estado === "activa" ? `<span class="etiqueta etiqueta-aviso">⚠️ Evidencia disputada</span>` : ""}
         </span>
         <span class="lado">${e.animo ? ANIMO[e.animo].emoji : ""}</span>
       </button>`;
@@ -1090,7 +1108,7 @@
 
   async function verEntreno(id) {
     const { data: e, error } = await db.from("entrenos")
-      .select("*, evidencias(ruta), rutinas_youtube(video_id, titulo), entrenos_privado(kcal_est)").eq("id", id).single();
+      .select("*, evidencias(ruta), rutinas_youtube(video_id, titulo), entrenos_privado(kcal_est), disputas(*)").eq("id", id).single();
     if (error) return avisar(errorLegible(error));
     const urls = await urlsFirmadas(e.evidencias.map((x) => x.ruta));
     const esMio = e.user_id === usuario.id;
@@ -1113,6 +1131,10 @@
       ${esMio && kcal ? `<div class="kcal">🔒 Aproximadamente ${kcal} kcal quemadas (solo tú lo ves).</div>` : ""}
       ${!esMio && e.juntos === "pendiente" ? `<div class="acciones-juntos"><button type="button" data-entreno-juntos="si" data-id="${e.id}">Confirmar que fue juntos</button>
         <button type="button" class="secundario" style="margin:0" data-entreno-juntos="no" data-id="${e.id}">No fue juntos</button></div>` : ""}
+      ${e.disputas?.estado === "activa" ? `<section class="tarjeta"><h3>⚠️ Evidencia disputada</h3><p>${esc(e.disputas.nota)}</p><p class="ayuda">Mientras la disputa esté activa, este entrenamiento no cuenta.</p>
+        ${e.disputas.disputado_por === usuario.id ? `<button type="button" class="secundario" data-retirar-disputa="${e.id}">Retirar mi disputa</button>` : ""}</section>` : ""}
+      ${!esMio && e.disputas?.estado !== "activa" && (Date.now() - new Date(e.creado_en).getTime()) < 48 * 3600 * 1000
+        ? `<button type="button" class="secundario" data-disputar="${e.id}" style="margin-top:12px">Disputar la evidencia</button><p class="ayuda">Tienes 48 horas desde que se registró.</p>` : ""}
       ${editable ? `<button type="button" class="secundario" data-borrar-entreno="${e.id}" style="margin-top:20px;color:var(--error)">Eliminar entrenamiento</button>` : ""}`);
   }
 
@@ -1162,6 +1184,384 @@
   $("vista").addEventListener("click", accionesEntrenos);
   $("hoja").addEventListener("click", accionesEntrenos);
 
+
+  // ================================================================ EXCEPCIONES (fase 4)
+  const MOTIVOS = {
+    viaje: ["✈️", "Viaje"], enfermedad: ["🤒", "Enfermedad"], lesion: ["🩹", "Lesión"], pausa: ["⏸", "Pausa"],
+    navidad: ["🎄", "Navidad"], ano_nuevo: ["🎆", "Año nuevo"], cumpleanos: ["🎂", "Cumpleaños"], cumpleanos_pareja: ["🎂", "Cumpleaños"]
+  };
+  const TRATAMIENTOS = [["descanso", "😴 Descanso"], ["fisioterapia", "🩺 Fisioterapia"], ["medicamentos", "💊 Medicamentos"],
+    ["masajes", "💆 Masajes"], ["frio_calor", "🧊 Frío / calor"], ["otro", "✨ Otro"]];
+  const ESTADO_JUST = { pendiente: "Pendiente", aprobada: "Aprobada", vetada: "Vetada", retirada: "Retirada" };
+
+  // Meta de la semana descontando días justificados, libres o en pausa (sin entrenamiento)
+  function metaEfectiva(p) {
+    const meta = p.meta_mes?.entrenos_semana || 0;
+    const excusas = p.excusas || {};
+    const hechos = p.dias_entrenados || [];
+    const plan = p.plan || [];
+    const red = Object.keys(excusas).map(Number).filter((d) => plan.includes(d) && !hechos.includes(d)).length;
+    return Math.max(0, meta - red);
+  }
+  const fechaDeDia = (p, dow) => sumarDias(p.semana_actual, dow - 1);
+  const nombreDia = (iso) => fmt(iso, { weekday: "long", day: "numeric", month: "short" });
+
+  // ---------- Tarjeta "Cambios y ausencias" en Entrenar
+  function tarjetaCambios() {
+    return `
+      <section class="tarjeta">
+        <h3>Cambios y ausencias</h3>
+        <div class="botones-lista">
+          <button type="button" class="secundario" data-exc="mover">↔️ Mover un entrenamiento</button>
+          <button type="button" class="secundario" data-exc="justificar">📝 Justificar una ausencia</button>
+          <button type="button" class="secundario" data-exc="lesion">🩹 Lesión y pausa</button>
+          <button type="button" class="enlace" data-exc="historial">Ver mis ausencias y cupos</button>
+        </div>
+      </section>`;
+  }
+
+  // ---------- "Necesita tu respuesta" (Inicio y Entrenar)
+  async function cargarPorResponder(cont) {
+    if (!cont) return;
+    const { data } = await db.rpc("estado_excepciones");
+    if (!data) { cont.innerHTML = ""; return; }
+    const otro = esc(pareja()?.nombre || "Tu pareja");
+    const r = data.por_responder;
+    const bloques = [];
+    for (const j of r.justificaciones) bloques.push(`
+      <section class="tarjeta pendiente">
+        <h3>${MOTIVOS[j.tipo][0]} ${otro} justificó el ${nombreDia(j.fecha)}</h3>
+        <p><strong>${MOTIVOS[j.tipo][1]}:</strong> ${esc(j.motivo)}</p>
+        ${j.foto_ruta ? `<button type="button" class="enlace" data-ver-foto="${esc(j.foto_ruta)}" style="text-align:left;padding-left:0">Ver foto adjunta</button>` : ""}
+        <p class="ayuda">Si no respondes en 48 horas, se aprueba sola.</p>
+        <div class="acciones-juntos">
+          <button type="button" data-just="si" data-id="${j.id}">Aprobar</button>
+          <button type="button" class="secundario" style="margin:0" data-just="no" data-id="${j.id}">Vetar</button>
+        </div>
+      </section>`);
+    for (const pa of r.pausas) bloques.push(`
+      <section class="tarjeta pendiente">
+        <h3>⏸ ${otro} pide pausar la competencia</h3>
+        <p>Lesión: ${esc(pa.motivo)}</p>
+        <p>Desde el ${nombreDia(pa.desde)}${pa.meta_adaptada ? ` · meta adaptada de ${pa.meta_adaptada} por semana` : " · sin meta adaptada"}.</p>
+        <p class="ayuda">Mientras dure, no tendrá faltas ni multas y el marcador quedará congelado. Necesita tu "sí".</p>
+        <div class="acciones-juntos">
+          <button type="button" data-pausa="si" data-id="${pa.id}">Aprobar pausa</button>
+          <button type="button" class="secundario" style="margin:0" data-pausa="no" data-id="${pa.id}">Rechazar</button>
+        </div>
+      </section>`);
+    for (const a of r.ampliaciones) bloques.push(`
+      <section class="tarjeta pendiente">
+        <h3>✈️ ${otro} pide ${a.dias} día${a.dias === 1 ? "" : "s"} más de viaje</h3>
+        <p>${esc(a.motivo)}</p>
+        <p class="ayuda">Sin respuesta en 48 horas, se rechaza.</p>
+        <div class="acciones-juntos">
+          <button type="button" data-ampl="si" data-id="${a.id}">Aceptar</button>
+          <button type="button" class="secundario" style="margin:0" data-ampl="no" data-id="${a.id}">Rechazar</button>
+        </div>
+      </section>`);
+    cont.innerHTML = bloques.length ? `<h3 style="margin:22px 0 10px">Necesita tu respuesta</h3>` + bloques.join("") : "";
+  }
+
+  // ---------- Hoja: mover un entrenamiento
+  function hojaMover() {
+    const y = yo();
+    const plan = y.plan || [];
+    const hoy = y.hoy;
+    const destinosPrevios = (y.reprogramaciones || []).map((r) => r.destino);
+    const origenes = plan.map((d) => fechaDeDia(y, d)).filter((f) => f >= hoy && !destinosPrevios.includes(f));
+    const destinos = [1, 2, 3, 4, 5, 6, 7].filter((d) => !plan.includes(d)).map((d) => fechaDeDia(y, d)).filter((f) => f >= hoy);
+    const usadas = (y.reprogramaciones || []).length;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">Mover un entrenamiento</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Dentro de esta semana y antes de que termine el día original. Usaste ${usadas} de 2 esta semana.</p>
+      ${!origenes.length || !destinos.length ? `<p class="aviso">No hay ${!origenes.length ? "entrenamientos previstos que puedas mover" : "días libres a los que moverlo"} esta semana.</p>` : `
+      <div class="campo"><label for="mv-origen">Entrenamiento previsto del</label>
+        <select id="mv-origen">${origenes.map((f) => `<option value="${f}">${nombreDia(f)}</option>`).join("")}</select></div>
+      <div class="campo"><label for="mv-destino">Moverlo al</label>
+        <select id="mv-destino">${destinos.map((f) => `<option value="${f}">${nombreDia(f)}</option>`).join("")}</select></div>
+      <button type="button" class="boton-principal" id="mv-guardar">Mover</button>`}`);
+    $("mv-guardar")?.addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      const r = await db.rpc("reprogramar", { p_origen: $("mv-origen").value, p_destino: $("mv-destino").value });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Entrenamiento movido.", "ok"); await recargarEstado(); irA("entrenar");
+    });
+  }
+
+  // ---------- Hoja: justificar una ausencia
+  async function hojaJustificar() {
+    const { data } = await db.rpc("estado_excepciones");
+    const y = yo();
+    const c = data?.cupos;
+    let tipo = "enfermedad", foto = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">Justificar una ausencia</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Hasta 2 días después de la ausencia. ${esc(pareja()?.nombre || "Tu pareja")} tendrá 48 horas para vetarla.</p>
+      ${c ? `<div class="cupos"><span>✈️ Viaje: <strong>${c.viaje.total - c.viaje.usados}</strong> de ${c.viaje.total} disponibles</span><span>🤒 Enfermedad: <strong>${c.enfermedad.total - c.enfermedad.usados}</strong> de ${c.enfermedad.total}</span><span>🩹 Lesión: sin tope</span></div>` : ""}
+      <span class="grupo-titulo" style="margin-top:16px">Motivo</span>
+      <div class="opciones campo" id="js-tipo">
+        <label><input type="radio" name="js-tipo" value="viaje"><span>✈️ Viaje</span></label>
+        <label><input type="radio" name="js-tipo" value="enfermedad" checked><span>🤒 Enfermedad</span></label>
+        <label><input type="radio" name="js-tipo" value="lesion"><span>🩹 Lesión</span></label>
+      </div>
+      <div class="fila campo">
+        <div><label for="js-desde">Desde</label><input id="js-desde" type="date" value="${y.hoy}" min="${sumarDias(y.hoy, -2)}" max="${sumarDias(y.hoy, 60)}"></div>
+        <div><label for="js-hasta">Hasta</label><input id="js-hasta" type="date" value="${y.hoy}" min="${sumarDias(y.hoy, -2)}" max="${sumarDias(y.hoy, 60)}"></div>
+      </div>
+      <p class="ayuda" style="margin:-8px 0 16px">Solo consumen cupo los días con entrenamiento previsto.</p>
+      <div class="campo"><label for="js-motivo">Explica qué pasó</label><textarea id="js-motivo" maxlength="500"></textarea></div>
+      <div class="campo" id="js-foto-c"><span class="grupo-titulo">Foto (opcional): nota médica, receta…</span>
+        <label class="agregar-foto" style="aspect-ratio:auto;padding:16px" id="js-foto-l"><input type="file" accept="image/*" id="js-foto">📷 Adjuntar foto</label></div>
+      <button type="button" class="boton-principal" id="js-guardar">Enviar justificación</button>
+      <button type="button" class="enlace" data-exc="ampliar">¿Te faltan días de viaje? Pide una ampliación</button>`);
+    $("js-tipo").addEventListener("change", (e) => { tipo = e.target.value; });
+    $("js-foto").addEventListener("change", (e) => {
+      foto = e.target.files[0] || null;
+      $("js-foto-l").childNodes[1].textContent = foto ? "✓ Foto lista" : "📷 Adjuntar foto";
+    });
+    $("js-desde").addEventListener("change", () => { if ($("js-hasta").value < $("js-desde").value) $("js-hasta").value = $("js-desde").value; });
+    $("js-guardar").addEventListener("click", async (e) => {
+      const motivo = $("js-motivo").value.trim();
+      if (!motivo) return avisar("Explica el motivo de la ausencia.");
+      e.target.disabled = true;
+      let ruta = null;
+      try {
+        if (foto) {
+          ruta = `${usuario.id}/justificaciones/${Date.now()}.jpg`;
+          const up = await db.storage.from("evidencias").upload(ruta, await comprimir(foto, 1600, 0.75), { contentType: "image/jpeg" });
+          if (up.error) throw up.error;
+        }
+        const r = await db.rpc("solicitar_justificacion", { p_desde: $("js-desde").value, p_hasta: $("js-hasta").value, p_tipo: tipo, p_motivo: motivo, p_foto: ruta });
+        if (r.error) throw r.error;
+        cerrarHoja(); avisar(`Justificación enviada (${r.data} día${r.data === 1 ? "" : "s"}).`, "ok");
+        await recargarEstado(); irA(vistaActual === "ausencias" ? "ausencias" : "entrenar");
+      } catch (err) { e.target.disabled = false; avisar(errorLegible(err)); }
+    });
+  }
+
+  function hojaAmpliar() {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">Más días de viaje</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Tu pareja tiene que aceptarlo. Sin respuesta en 48 horas, se rechaza.</p>
+      <div class="campo"><label for="am-dias">Días extra</label><input id="am-dias" type="number" inputmode="numeric" min="1" max="30" value="1"></div>
+      <div class="campo"><label for="am-motivo">Motivo</label><textarea id="am-motivo" maxlength="500"></textarea></div>
+      <button type="button" class="boton-principal" id="am-guardar">Pedir ampliación</button>`);
+    $("am-guardar").addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      const r = await db.rpc("ampliar_cupo_viaje", { p_dias: Number($("am-dias").value), p_motivo: $("am-motivo").value });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Solicitud enviada.", "ok");
+    });
+  }
+
+  // ---------- Hoja: lesión y pausa
+  async function hojaLesion() {
+    const y = yo(), p = pareja();
+    const pausa = y.pausa;
+    const { data } = await db.rpc("estado_excepciones");
+    const tratamientos = data?.tratamientos || [];
+    const listaTrat = tratamientos.length ? `<div class="lista">${tratamientos.map((t) => `
+        <div class="item" style="grid-template-columns:minmax(0,1fr);min-height:0">
+          <span><strong>${TRATAMIENTOS.find((x) => x[0] === t.tipo)?.[1] || t.tipo}</strong><span class="meta">${etiquetaFecha(t.fecha)}${t.notas ? " · " + esc(t.notas) : ""}</span></span>
+        </div>`).join("")}</div>` : `<p class="ayuda">Aún no registraste tratamientos.</p>`;
+    let cuerpo;
+    if (pausa?.estado === "activa") {
+      cuerpo = `
+        <section class="tarjeta"><h3>⏸ Pausa activa desde el ${nombreDia(pausa.desde)}</h3>
+          <p>${esc(pausa.motivo)}</p>
+          ${pausa.meta_adaptada ? `<p>Meta adaptada: ${pausa.meta_adaptada} por semana.</p>` : ""}
+          ${pausa.revision_solicitada ? `<p class="aviso">${esc(p?.nombre || "Tu pareja")} pidió una revisión${pausa.nota_revision ? ": " + esc(pausa.nota_revision) : ""}.</p>` : ""}
+        </section>
+        <section class="tarjeta"><h3>¿Cómo va tu lesión hoy?</h3>
+          <div class="chips" id="pz-estado" style="margin-top:12px">
+            <button type="button" data-pz="igual" aria-pressed="false">Igual</button>
+            <button type="button" data-pz="mejorando" aria-pressed="false">Mejorando</button>
+            <button type="button" data-pz="lista" aria-pressed="false">Lista para volver</button>
+          </div>
+          <textarea id="pz-nota" maxlength="500" placeholder="Nota (opcional)" style="margin-top:12px"></textarea>
+          <button type="button" class="boton-principal" id="pz-guardar" style="margin-top:12px">Guardar actualización</button>
+        </section>`;
+    } else if (pausa?.estado === "solicitada") {
+      cuerpo = `<section class="tarjeta"><h3>⏸ Pausa solicitada</h3><p>Esperando que ${esc(p?.nombre || "tu pareja")} la apruebe.</p></section>`;
+    } else {
+      cuerpo = `
+        <section class="tarjeta"><h3>¿Una lesión que no se resolverá pronto?</h3>
+          <p>El primer día, justifícalo como <strong>Lesión</strong> (sin tope de días). Desde el segundo día puedes pedir una pausa de competencia: no tendrás faltas ni multas, tus rachas se congelan y el marcador se detiene. Tu pareja tiene que aprobarla.</p>
+          <div class="fila campo" style="margin-top:16px">
+            <div><label for="pz-desde">Pausa desde</label><input id="pz-desde" type="date" value="${y.hoy}" min="${sumarDias(y.hoy, -2)}" max="${sumarDias(y.hoy, 1)}"></div>
+            <div><label for="pz-meta">Meta adaptada / semana</label><input id="pz-meta" type="number" inputmode="numeric" min="0" max="7" value="0"></div>
+          </div>
+          <p class="ayuda" style="margin:-8px 0 14px">Por ejemplo, sesiones de rehabilitación. Déjala en 0 si no puedes entrenar.</p>
+          <div class="campo"><label for="pz-motivo">Describe la lesión</label><textarea id="pz-motivo" maxlength="500"></textarea></div>
+          <button type="button" class="boton-principal" id="pz-pedir">Pedir pausa</button>
+        </section>`;
+    }
+    const pausaPareja = p?.pausa?.estado === "activa" ? `
+      <section class="tarjeta"><h3>⏸ ${esc(p.nombre)} está en pausa</h3>
+        <p>${esc(p.pausa.motivo)}</p>
+        <textarea id="rv-nota" maxlength="500" placeholder="¿Qué quieres que revise? (opcional)" style="margin-top:12px"></textarea>
+        <button type="button" class="secundario" id="rv-pedir">Pedir una revisión de la pausa</button>
+      </section>` : "";
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">Lesión y pausa</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      ${cuerpo}
+      ${pausaPareja}
+      <section class="tarjeta"><h3>Tratamiento</h3>
+        <div class="chips" id="tr-tipo" style="margin:12px 0">${TRATAMIENTOS.map(([k, n]) => `<button type="button" data-tr="${k}" aria-pressed="false">${n}</button>`).join("")}</div>
+        <textarea id="tr-notas" maxlength="500" placeholder="Detalles: ejercicios, dosis, sesión…"></textarea>
+        <button type="button" class="secundario" id="tr-guardar">Registrar tratamiento de hoy</button>
+        <div style="margin-top:14px">${listaTrat}</div>
+      </section>`);
+
+    let estadoPz = null, tipoTr = null;
+    $("pz-estado")?.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pz]"); if (!b) return;
+      estadoPz = b.dataset.pz; $("pz-estado").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    });
+    $("pz-guardar")?.addEventListener("click", async (e) => {
+      if (!estadoPz) return avisar("Elige cómo va tu lesión.");
+      e.target.disabled = true;
+      const r = await db.rpc("actualizar_pausa", { p_estado: estadoPz, p_nota: $("pz-nota").value });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar(r.data === "terminada" ? "¡Bienvenida de vuelta! La pausa terminó hoy." : "Actualización guardada.", "ok");
+      await recargarEstado(); irA(vistaActual);
+    });
+    $("pz-pedir")?.addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      const r = await db.rpc("solicitar_pausa", { p_desde: $("pz-desde").value, p_meta_adaptada: Number($("pz-meta").value || 0), p_motivo: $("pz-motivo").value });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Pausa solicitada. Falta que tu pareja la apruebe.", "ok"); await recargarEstado(); irA(vistaActual);
+    });
+    $("rv-pedir")?.addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      const r = await db.rpc("pedir_revision_pausa", { p_nota: $("rv-nota").value });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Revisión pedida.", "ok");
+    });
+    $("tr-tipo").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-tr]"); if (!b) return;
+      tipoTr = b.dataset.tr; $("tr-tipo").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    });
+    $("tr-guardar").addEventListener("click", async (e) => {
+      if (!tipoTr) return avisar("Elige el tipo de tratamiento.");
+      e.target.disabled = true;
+      const r = await db.from("tratamientos").insert({ user_id: usuario.id, fecha: y.hoy, tipo: tipoTr, notas: $("tr-notas").value.trim() || null });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("Tratamiento registrado.", "ok"); hojaLesion();
+    });
+  }
+
+  // ---------- Vista: mis ausencias y cupos
+  async function vistaAusencias() {
+    vistaActual = "ausencias";
+    $("vista").innerHTML = `<div class="cabecera-vista"><h2 class="titulo">Ausencias</h2><button type="button" data-accion="volver-entrenar">Volver</button></div><p class="sub">Cargando…</p>`;
+    const { data, error } = await db.rpc("estado_excepciones");
+    if (error) return avisar(errorLegible(error));
+    const c = data.cupos;
+    const trim = fmt(data.trimestre, { month: "long" }) + " – " + fmt(sumarMeses(data.trimestre, 2), { month: "long", year: "numeric" });
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">Ausencias</h2><button type="button" data-accion="volver-entrenar">Volver</button></div>
+      <p class="sub">Trimestre ${trim}</p>
+      <section class="tarjeta">
+        <h3>Cupos del trimestre</h3>
+        <div class="fila-stat"><span>✈️ Viaje</span><strong>${c.viaje.usados} usados</strong><strong>${c.viaje.total - c.viaje.usados} libres</strong></div>
+        <div class="fila-stat"><span>🤒 Enfermedad</span><strong>${c.enfermedad.usados} usados</strong><strong>${c.enfermedad.total - c.enfermedad.usados} libres</strong></div>
+        <div class="fila-stat"><span>🩹 Lesión</span><strong colspan="2">Sin tope</strong><strong></strong></div>
+        ${data.ampliaciones_mias.map((a) => `<p class="ayuda">Ampliación de ${a.dias} día(s): ${a.estado}.</p>`).join("")}
+        <button type="button" class="secundario" data-exc="justificar">📝 Justificar una ausencia</button>
+      </section>
+      <h3 style="margin:22px 0 10px">Mis justificaciones</h3>
+      <div class="lista">${data.mias.length ? data.mias.map((j) => `
+        <div class="tarjeta" style="margin:0">
+          <h3>${MOTIVOS[j.tipo][0]} ${nombreDia(j.fecha)}</h3>
+          <span class="etiqueta ${j.estado === "vetada" ? "etiqueta-aviso" : ""}">${ESTADO_JUST[j.estado]}</span>${j.consume_cupo && ["pendiente", "aprobada"].includes(j.estado) ? `<span class="etiqueta">Consume cupo</span>` : ""}
+          <p>${esc(j.motivo)}</p>
+          ${j.estado === "vetada" && j.nota_veto ? `<p class="aviso">Vetada: ${esc(j.nota_veto)}</p>` : ""}
+          ${["pendiente", "aprobada"].includes(j.estado) ? `<button type="button" class="enlace" data-retirar-just="${j.id}" style="text-align:left;padding-left:0">Retirar justificación</button>` : ""}
+        </div>`).join("") : `<p class="vacio">No has justificado ausencias.</p>`}</div>`;
+  }
+
+  // ---------- Acciones
+  async function accionesExcepciones(e) {
+    const t = e.target;
+    const exc = t.closest("[data-exc]");
+    if (exc) {
+      const a = exc.dataset.exc;
+      if (a === "mover") return hojaMover();
+      if (a === "justificar") return hojaJustificar();
+      if (a === "lesion") return hojaLesion();
+      if (a === "ampliar") return hojaAmpliar();
+      if (a === "historial") { cerrarHoja(); return vistaAusencias(); }
+    }
+    const just = t.closest("[data-just]");
+    if (just) {
+      const acepta = just.dataset.just === "si";
+      let nota = null;
+      if (!acepta) {
+        nota = prompt("¿Por qué vetas esta justificación? Tu pareja verá esta nota.");
+        if (nota === null) return;
+        if (!nota.trim()) return avisar("Para vetar hay que escribir una nota.");
+      }
+      just.disabled = true;
+      const r = await db.rpc("responder_justificacion", { p_id: Number(just.dataset.id), p_acepta: acepta, p_nota: nota });
+      if (r.error) { just.disabled = false; return avisar(errorLegible(r.error)); }
+      avisar(acepta ? "Justificación aprobada." : "Justificación vetada: ese día cuenta como falta.", "ok");
+      await recargarEstado(); return irA(vistaActual);
+    }
+    const pz = t.closest("[data-pausa]");
+    if (pz) {
+      const acepta = pz.dataset.pausa === "si";
+      const nota = acepta ? null : prompt("¿Quieres dejar una nota? (opcional)") || null;
+      pz.disabled = true;
+      const r = await db.rpc("responder_pausa", { p_id: Number(pz.dataset.id), p_acepta: acepta, p_nota: nota });
+      if (r.error) { pz.disabled = false; return avisar(errorLegible(r.error)); }
+      avisar(acepta ? "Pausa aprobada. El marcador queda congelado." : "Pausa rechazada.", "ok");
+      await recargarEstado(); return irA(vistaActual);
+    }
+    const am = t.closest("[data-ampl]");
+    if (am) {
+      am.disabled = true;
+      const r = await db.rpc("responder_ampliacion", { p_id: Number(am.dataset.id), p_acepta: am.dataset.ampl === "si" });
+      if (r.error) { am.disabled = false; return avisar(errorLegible(r.error)); }
+      avisar(r.data === "aprobada" ? "Ampliación aceptada." : "Ampliación rechazada.", "ok");
+      return irA(vistaActual);
+    }
+    const ret = t.closest("[data-retirar-just]");
+    if (ret) {
+      if (!confirm("¿Retirar esta justificación? Si era un día previsto sin entrenar, contará como falta.")) return;
+      const r = await db.rpc("retirar_justificacion", { p_id: Number(ret.dataset.retirarJust) });
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("Justificación retirada.", "ok"); await recargarEstado(); return vistaAusencias();
+    }
+    const foto = t.closest("[data-ver-foto]");
+    if (foto) {
+      const u = await urlsFirmadas([foto.dataset.verFoto]);
+      if (u[foto.dataset.verFoto]) abrirHoja(`<div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">Foto adjunta</h2><button type="button" data-cerrar-hoja>Cerrar</button></div><div class="galeria"><img src="${u[foto.dataset.verFoto]}" alt="Foto adjunta"></div>`);
+    }
+    const disp = t.closest("[data-disputar]");
+    if (disp) {
+      const nota = prompt("¿Por qué disputas esta evidencia? Tu pareja verá esta nota. El entrenamiento dejará de contar.");
+      if (nota === null) return;
+      const r = await db.rpc("disputar_entreno", { p_entreno: Number(disp.dataset.disputar), p_nota: nota });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Evidencia disputada.", "ok"); await recargarEstado(); return irA(vistaActual);
+    }
+    const rdisp = t.closest("[data-retirar-disputa]");
+    if (rdisp) {
+      const r = await db.rpc("retirar_disputa", { p_entreno: Number(rdisp.dataset.retirarDisputa) });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Disputa retirada: el entrenamiento vuelve a contar.", "ok"); await recargarEstado(); return irA(vistaActual);
+    }
+  }
+  $("vista").addEventListener("click", accionesExcepciones);
+  $("hoja").addEventListener("click", accionesExcepciones);
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
