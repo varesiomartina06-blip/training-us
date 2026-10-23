@@ -124,6 +124,7 @@
     if (rz.error) console.warn("Zona:", rz.error.message);
     else if (rz.data === "cambio_programado") avisar(`Detectamos la zona ${zona}. Se aplicará desde mañana.`, "ok");
     await recargar();
+    limpiarComprobantes().catch(() => {});
   }
 
   async function recargar() {
@@ -171,6 +172,7 @@
     else if (v === "entrenar") vistaEntrenar();
     else if (v === "ausencias") vistaAusencias();
     else if (v === "metas") vistaMetas();
+    else if (v === "multas") vistaMultas();
     else vistaPerfil(false);
   }
 
@@ -246,14 +248,30 @@
       ${tarjetaJuntos()}`;
     cargarPendientesJuntos($("inicio-pendientes"));
     cargarPorResponder($("por-responder-inicio"));
-    const { data, error } = await db.rpc("marcador");
+    const [mr, mu] = await Promise.all([db.rpc("marcador"), db.rpc("estado_multas")]);
+    const data = mr.data, error = mr.error;
     if (error || !data) { $("marcador").innerHTML = ""; return avisar("No se pudo cargar el marcador: " + errorLegible(error) + ". ¿Ejecutaste fase3.sql?"); }
-    if (vistaActual === "inicio") $("marcador").innerHTML = htmlMarcador(data);
+    if (vistaActual !== "inicio") return;
+    $("marcador").innerHTML = htmlMarcador(data, mu.data);
+    const mia = mu.data?.participantes?.[0];
+    if (mia && Number(mia.pendiente) > 0) {
+      const vencida = mia.multas.some((m) => m.estado === "pendiente" && m.vence < mia.hoy);
+      $("por-responder-inicio").insertAdjacentHTML("beforebegin", `
+        <section class="tarjeta pendiente">
+          <h3>💰 Tienes ${usd(mia.pendiente)} por pagar</h3>
+          <p>${vencida ? "Hay multas vencidas: cada día resta puntos." : "Transfiere a tu cuenta de ahorro y sube el comprobante."}</p>
+          <button type="button" class="secundario" data-ir-multas>Ir a multas</button>
+        </section>`);
+    }
   }
 
   // ================================================================ MARCADOR (fase 3)
   const pct = (a, b) => (b > 0 ? Math.round((100 * a) / b) : 100);
-  function htmlMarcador(m) {
+  function htmlMarcador(m, mu) {
+    const deuda = (x) => {
+      const d = mu?.participantes?.find((y) => y.id === x.id);
+      return d ? (Number(d.pendiente) > 0 ? `${usd(d.pendiente)} <small>pendiente</small>` : "Al día") : "—";
+    };
     const [a, b] = m.participantes;
     const pa = estado.participantes.find((x) => x.id === a.id);
     const pb = b ? estado.participantes.find((x) => x.id === b.id) : null;
@@ -310,7 +328,7 @@
         ${fila("🏅 Meses perfectos seguidos", (x) => r(x, "mensual"))}
         ${fila("Adicionales este mes", (x) => x.mes.extras + (x.semana?.extras || 0))}
         ${fila("Faltas este mes", (x) => x.mes.faltas)}
-        ${fila("💰 Multas", () => "<small>fase 5</small>")}
+        ${fila("💰 Multas", deuda)}
       </section>
 
       <section class="tarjeta">
@@ -1562,6 +1580,160 @@
   }
   $("vista").addEventListener("click", accionesExcepciones);
   $("hoja").addEventListener("click", accionesExcepciones);
+
+  // ================================================================ MULTAS Y PAGOS (fase 5)
+  const usd = (n) => "USD " + Number(n || 0).toFixed(2);
+  const ESTADO_MULTA = { pendiente: "Pendiente", pagada: "Pagada" };
+  let multasDe = "yo";
+
+  function textoVencimiento(m, hoy) {
+    if (m.estado !== "pendiente") return "";
+    const dias = (aFecha(m.vence) - aFecha(hoy)) / 86400000;
+    if (dias > 0) return `Vence el ${fmt(m.vence, { weekday: "long", day: "numeric", month: "short" })}`;
+    if (dias === 0) return "Vence hoy";
+    const retraso = -dias;
+    return `Vencida hace ${retraso} día${retraso === 1 ? "" : "s"}: ${m.puntos_retraso} pts${Number(m.recargo) > 0 ? ` y ${usd(m.recargo)} de recargo` : ""}`;
+  }
+
+  async function vistaMultas() {
+    $("vista").innerHTML = `<h2 class="titulo">Multas</h2><p class="sub">Cargando…</p>`;
+    const { data, error } = await db.rpc("estado_multas");
+    if (error || !data) return avisar("No se pudieron cargar las multas: " + errorLegible(error) + ". ¿Ejecutaste fase5.sql?");
+    if (vistaActual !== "multas") return;
+    const [mi, otro] = data.participantes;
+    const pYo = yo(), pOtro = pareja();
+    const nom = (p) => esc(p?.nombre || "—");
+    const tema = (p) => p?.tema || "";
+    const vencidas = mi.multas.filter((m) => m.estado === "pendiente" && m.vence < mi.hoy).length;
+    const proximoVence = mi.multas.filter((m) => m.estado === "pendiente").map((m) => m.vence).sort()[0];
+    const verDe = multasDe === "yo" ? mi : otro;
+    const comprobantes = (otro?.pagos || []).filter((p) => p.disponible && p.ruta);
+
+    $("vista").innerHTML = `
+      <h2 class="titulo">Multas</h2>
+      <p class="sub">Cada falta injustificada genera una multa. Transfiere a tu cuenta de ahorro del desafío y sube el comprobante.</p>
+
+      <section class="tarjeta deuda ${Number(mi.pendiente) > 0 ? "con-deuda" : ""}">
+        <span class="puntos-etiqueta">Tu deuda pendiente</span>
+        <div class="cifra">${usd(mi.pendiente)}</div>
+        ${Number(mi.pendiente) > 0 ? `
+          <p>${vencidas ? `⚠️ Tienes ${vencidas} multa${vencidas === 1 ? "" : "s"} vencida${vencidas === 1 ? "" : "s"}: cada día resta puntos y, desde el día 5, suma recargo.` : `Plazo: ${fmt(proximoVence, { weekday: "long", day: "numeric", month: "short" })}.`}</p>
+          <button type="button" class="boton-principal" data-pagar style="margin-top:14px">Ya transferí: subir comprobante</button>` : `<p>Estás al día. 🎉</p>`}
+        <p class="ayuda" style="margin-top:12px">Tu próxima falta costaría ${usd(mi.proxima.monto)} (falta n.º ${mi.proxima.nivel} desde el último reinicio). Un mes perfecto reinicia la escala.</p>
+      </section>
+
+      ${comprobantes.map((p) => `
+        <section class="tarjeta pendiente">
+          <h3>🧾 ${nom(pOtro)} subió un comprobante de ${usd(p.monto)}</h3>
+          <p>Solo puedes verlo una vez; después se borra.</p>
+          <button type="button" class="secundario" data-ver-comprobante="${p.id}" data-ruta="${esc(p.ruta)}">Ver comprobante</button>
+        </section>`).join("")}
+
+      <section class="tarjeta">
+        <div class="fila-stat cabecera"><span></span><strong class="${tema(pYo)}">${nom(pYo)}</strong>${otro ? `<strong class="${tema(pOtro)}">${nom(pOtro)}</strong>` : ""}</div>
+        <div class="fila-stat"><span>Deuda generada</span><strong class="${tema(pYo)}">${usd(mi.generada)}</strong>${otro ? `<strong class="${tema(pOtro)}">${usd(otro.generada)}</strong>` : ""}</div>
+        <div class="fila-stat"><span>Deuda pendiente</span><strong class="${tema(pYo)}">${usd(mi.pendiente)}</strong>${otro ? `<strong class="${tema(pOtro)}">${usd(otro.pendiente)}</strong>` : ""}</div>
+        <div class="fila-stat"><span>Saldo transferido</span><strong class="${tema(pYo)}">${usd(mi.transferido)}</strong>${otro ? `<strong class="${tema(pOtro)}">${usd(otro.transferido)}</strong>` : ""}</div>
+      </section>
+
+      <div class="segmentado" role="group" aria-label="Ver multas de">
+        <button type="button" data-multas-de="yo" aria-pressed="${multasDe === "yo"}">Mis multas</button>
+        <button type="button" data-multas-de="otro" aria-pressed="${multasDe === "otro"}">${nom(pOtro)}</button>
+      </div>
+      <div class="lista">
+        ${verDe?.multas.length ? verDe.multas.map((m) => `
+          <div class="item" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
+            <span><strong>Falta n.º ${m.nivel} · semana del ${fechaCorta(m.semana)}</strong>
+              <span class="meta">${ESTADO_MULTA[m.estado]}${m.estado === "pendiente" ? " · " + textoVencimiento(m, verDe.hoy) : ""}</span></span>
+            <span class="monto ${m.estado === "pendiente" ? "rojo" : ""}">${usd(Number(m.monto_base) + Number(m.recargo))}</span>
+          </div>`).join("") : `<p class="vacio">Sin multas. 💪</p>`}
+      </div>
+      ${verDe?.pagos.length ? `<h3 style="margin:22px 0 10px">Pagos</h3><div class="lista">${verDe.pagos.map((p) => `
+          <div class="item" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
+            <span><strong>${fmt(p.fecha, { day: "numeric", month: "long" })}</strong>
+              <span class="meta">${p.visto ? "Comprobante visto y borrado" : p.borrado || !p.disponible ? "Comprobante borrado" : "Comprobante sin ver"}</span></span>
+            <span class="monto">${usd(p.monto)}</span>
+          </div>`).join("")}</div>` : ""}`;
+  }
+
+  // ---------- Subir comprobante
+  function hojaPagar() {
+    let foto = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">Subir comprobante</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">El comprobante paga <strong>todas</strong> tus multas pendientes. Antes, transfiere el total a tu cuenta de ahorro del desafío. Marcar el pago aquí no mueve dinero.</p>
+      <div id="pg-foto" class="campo"><label class="agregar-foto" style="aspect-ratio:auto;padding:28px"><input type="file" accept="image/*" id="pg-archivo">📷 Elegir captura de la transferencia</label></div>
+      <p class="ayuda">Tu pareja podrá verlo una sola vez; después se borra. Guarda tu propio respaldo en tu banco.</p>
+      <button type="button" class="boton-principal" id="pg-enviar" disabled>Registrar pago</button>`);
+    $("pg-archivo").addEventListener("change", (e) => {
+      foto = e.target.files[0] || null;
+      if (!foto) return;
+      $("pg-foto").innerHTML = `<div class="galeria"><img src="${URL.createObjectURL(foto)}" alt="Vista previa del comprobante"></div>`;
+      $("pg-enviar").disabled = false;
+    });
+    $("pg-enviar").addEventListener("click", async (e) => {
+      if (!foto) return avisar("Elige la captura del comprobante.");
+      e.target.disabled = true; e.target.textContent = "Subiendo…";
+      try {
+        const ruta = `${usuario.id}/${Date.now()}.jpg`;
+        const up = await db.storage.from("comprobantes").upload(ruta, await comprimir(foto, 1800, 0.82), { contentType: "image/jpeg" });
+        if (up.error) throw up.error;
+        const r = await db.rpc("registrar_pago", { p_ruta: ruta });
+        if (r.error) throw r.error;
+        cerrarHoja(); avisar(`Pago de ${usd(r.data)} registrado. ¡Al día! 🎉`, "ok"); vistaMultas();
+      } catch (err) { e.target.disabled = false; e.target.textContent = "Registrar pago"; avisar(errorLegible(err)); }
+    });
+  }
+
+  // ---------- Ver comprobante (una sola vez)
+  async function verComprobante(pagoId, ruta) {
+    if (!confirm("Solo puedes ver este comprobante una vez. ¿Abrirlo ahora?")) return;
+    const { data, error } = await db.storage.from("comprobantes").createSignedUrl(ruta, 120);
+    if (error || !data?.signedUrl) return avisar("Ese comprobante ya no está disponible.");
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">Comprobante</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub" id="cp-estado">Cargando…</p>
+      <div class="galeria"><img id="cp-img" src="${data.signedUrl}" alt="Comprobante de transferencia"></div>`);
+    let marcado = false;
+    $("cp-img").addEventListener("load", () => {
+      $("cp-estado").textContent = "Míralo con calma: al cerrar, se borrará.";
+      setTimeout(async () => {
+        if ($("hoja").hidden || marcado) return;
+        marcado = true;
+        const r = await db.rpc("marcar_comprobante_visto", { p_pago: pagoId });
+        if (r.error) return;
+        const del = await db.storage.from("comprobantes").remove([ruta]);
+        if (!del.error) await db.rpc("marcar_comprobante_borrado", { p_pago: pagoId });
+      }, 3000);
+    });
+    $("cp-img").addEventListener("error", () => { $("cp-estado").textContent = "No se pudo cargar. Inténtalo de nuevo más tarde."; });
+  }
+
+  // Limpieza: borra del almacenamiento mis comprobantes que caducaron sin verse
+  async function limpiarComprobantes() {
+    const { data } = await db.from("pagos").select("id, comprobante_ruta, creado_en, visto_en, comprobante_borrado")
+      .eq("user_id", usuario.id).eq("comprobante_borrado", false);
+    for (const p of data || []) {
+      const caducado = Date.now() - new Date(p.creado_en).getTime() > 7 * 86400000;
+      if (!p.visto_en && !caducado) continue;
+      const del = await db.storage.from("comprobantes").remove([p.comprobante_ruta]);
+      if (!del.error) await db.rpc("marcar_comprobante_borrado", { p_pago: p.id });
+    }
+  }
+
+  async function accionesMultas(e) {
+    const t = e.target;
+    if (t.closest("[data-pagar]")) return hojaPagar();
+    const de = t.closest("[data-multas-de]");
+    if (de) { multasDe = de.dataset.multasDe; return vistaMultas(); }
+    const vc = t.closest("[data-ver-comprobante]");
+    if (vc) return verComprobante(Number(vc.dataset.verComprobante), vc.dataset.ruta);
+    if (t.closest("[data-ir-multas]")) return irA("multas");
+  }
+  $("vista").addEventListener("click", accionesMultas);
+  $("hoja").addEventListener("click", (e) => {
+    if (e.target.closest("[data-cerrar-hoja]") && vistaActual === "multas") vistaMultas();
+  });
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
