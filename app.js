@@ -576,6 +576,7 @@
   const ANIMOS = [["satisfecho", "😌", "Satisfecho"], ["feliz", "😄", "Feliz"], ["decepcionado", "😞", "Decepcionado"],
     ["frustrado", "😤", "Frustrado"], ["agotado", "🫠", "Agotado"]];
   const ANIMO = Object.fromEntries(ANIMOS.map(([k, e, n]) => [k, { emoji: e, nombre: n }]));
+  const MIN_VALIDO = 20; // duración mínima para contar (la base de datos usa el ajuste 'duracion_minima_min')
   const MET = { musculacion: 5.0, funcional: 6.0, natacion: 7.0, senderismo: 6.0, caminadora: 6.0, escalada: 7.5, yoga: 2.5, pilates: 3.0, otro: 4.0 };
 
   // Calorías estimadas con la fórmula MET: kcal = MET × peso (kg) × horas
@@ -641,6 +642,14 @@
   }
   const nombreTipo = (e) => e.tipo === "otro" ? (e.tipo_otro || "Otro") : TIPO[e.tipo].nombre;
 
+  function textoSemana(y, dias, meta) {
+    const total = y.entrenos_semana ?? 0, validos = y.entrenos_validos ?? total, cortos = total - validos;
+    let t = `${validos} entrenamiento${validos === 1 ? "" : "s"} válido${validos === 1 ? "" : "s"}`;
+    if (cortos > 0) t += ` · ${cortos} de menos de ${MIN_VALIDO} min (no cuenta${cortos === 1 ? "" : "n"})`;
+    if (meta && dias > meta) t += ` · ${dias - meta} día${dias - meta === 1 ? "" : "s"} adicional${dias - meta === 1 ? "" : "es"}`;
+    return t + ".";
+  }
+
   // ---------- Vista Entrenar
   let entrenarDe = "yo";
   async function vistaEntrenar() {
@@ -655,7 +664,7 @@
         <h3>Esta semana</h3>
         <div class="cifra">${Math.min(dias, meta || dias)}<small> de ${meta || "—"} días con entrenamiento</small></div>
         <div class="progreso"><span style="width:${pct}%"></span></div>
-        <p>${y.entrenos_semana ?? 0} entrenamiento${y.entrenos_semana === 1 ? "" : "s"} registrado${y.entrenos_semana === 1 ? "" : "s"}${dias > meta && meta ? ` · ${dias - meta} día${dias - meta === 1 ? "" : "s"} adicional${dias - meta === 1 ? "" : "es"}` : ""}. El conteo oficial de puntos llega en la fase 3.</p>
+        <p>${textoSemana(y, dias, meta)}</p>
         <button type="button" class="boton-principal" data-accion="registrar" style="margin-top:16px">Registrar entrenamiento</button>
       </section>
       <div id="pendientes-juntos"></div>
@@ -695,6 +704,7 @@
           <span class="meta">${etiquetaFecha(e.fecha)}${e.hora ? " · " + e.hora.slice(0, 5) : ""} · ${esc(resumenEntreno(e))}</span>
           ${e.juntos === "confirmado" ? `<span class="etiqueta">💞 Juntos</span>` : e.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : ""}
           ${e.recuperacion ? `<span class="etiqueta">En recuperación</span>` : ""}
+          ${e.duracion_min < MIN_VALIDO ? `<span class="etiqueta etiqueta-aviso">No cuenta: menos de ${MIN_VALIDO} min</span>` : ""}
         </span>
         <span class="lado">${e.animo ? ANIMO[e.animo].emoji : ""}</span>
       </button>`;
@@ -861,7 +871,7 @@
     function calcular() {
       const min = Number($("rg-duracion").value) || 0;
       const aviso = $("rg-aviso-duracion");
-      aviso.textContent = min && min < 20 ? "Con menos de 20 minutos se guarda, pero no cuenta para tu meta semanal." : "";
+      aviso.textContent = min && min < MIN_VALIDO ? `Con menos de ${MIN_VALIDO} minutos se guarda, pero no cuenta para tu meta semanal.` : "";
       const kcal = estimarKcal(f.tipo, min, Number($("rg-km").value) || null, peso);
       $("rg-kcal").hidden = !kcal;
       if (kcal) $("rg-kcal").textContent = `🔒 Aproximadamente ${kcal} kcal quemadas (estimación privada).`;
@@ -1002,7 +1012,7 @@
       <p style="margin:0">${esc(resumenEntreno(e))}</p>
       ${e.juntos === "confirmado" ? `<span class="etiqueta">💞 Entrenaron juntos</span>` : e.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : e.juntos === "rechazado" ? `<span class="etiqueta">Juntos: no confirmado</span>` : ""}
       ${e.recuperacion ? `<span class="etiqueta">En recuperación de ${e.recuperacion === "lesion" ? "una lesión" : "una enfermedad"}</span>` : ""}
-      ${e.duracion_min < 20 ? `<span class="etiqueta">Menos de 20 min: no cuenta para la meta</span>` : ""}
+      ${e.duracion_min < MIN_VALIDO ? `<span class="etiqueta etiqueta-aviso">No cuenta para la meta: menos de ${MIN_VALIDO} min</span>` : ""}
       <div class="galeria">${e.evidencias.map((x) => urls[x.ruta] ? `<img src="${urls[x.ruta]}" alt="Evidencia">` : "").join("")}</div>
       ${e.animo ? `<section class="tarjeta"><h3>${ANIMO[e.animo].emoji} ${ANIMO[e.animo].nombre}</h3>${e.animo_nota ? `<p>${esc(e.animo_nota)}</p>` : ""}</section>` : ""}
       ${e.rutinas_youtube ? `<section class="tarjeta"><div class="yt"><img src="${miniaturaYoutube(e.rutinas_youtube.video_id)}" alt=""><div><strong>${esc(e.rutinas_youtube.titulo || "Rutina de YouTube")}</strong>

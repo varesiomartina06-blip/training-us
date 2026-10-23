@@ -296,3 +296,4 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .asa { width: 40px; height: 5px; border-radius: 99px; background: var(--borde); margin: 0 auto 14px; }
 .galeria { display: grid; gap: 10px; margin: 12px 0; }
 .galeria img { width: 100%; border-radius: 16px; background: var(--superficie); }
+.etiqueta-aviso { background: #FFF4D9; color: #6B5212; }
