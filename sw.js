@@ -1,6 +1,6 @@
 // training.us — service worker (fase 0).
 // Guarda la "cáscara" de la app para que abra rápido. Nunca guarda datos de Supabase.
-const CACHE = "training-us-v8";
+const CACHE = "training-us-v9";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./config.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png",
@@ -34,4 +34,28 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(req).then((r) => r || caches.match("./index.html")))
   );
+});
+
+// ---------- Notificaciones push (fase 6)
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "training.us", {
+    body: d.body || "",
+    icon: "icons/icon-192.png",
+    badge: "icons/icon-192.png",
+    tag: d.tag,
+    data: { url: d.url || "./" }
+  }));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "./";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((ventanas) => {
+    for (const v of ventanas) {
+      if ("focus" in v) { v.postMessage({ tipo: "abrir", url }); return v.focus(); }
+    }
+    return self.clients.openWindow(url);
+  }));
 });

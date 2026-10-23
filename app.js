@@ -144,6 +144,7 @@
     if (!perfil.completado) return vistaPerfil(true);
     mostrarPestanas(true);
     irA(vistaActual);
+    if (location.hash) { abrirDesdeUrl(location.hash); history.replaceState(null, "", location.pathname); }
   }
 
   function mostrarPestanas(si) {
@@ -162,7 +163,9 @@
   });
   function irA(v) {
     vistaActual = v;
-    const pestana = v === "ausencias" ? "entrenar" : v;
+    if (v === "registrar") v = "entrenar";
+    vistaActual = v;
+    const pestana = v === "ausencias" ? "entrenar" : v === "mensajes" ? "inicio" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
       if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
@@ -171,6 +174,7 @@
     if (v === "inicio") vistaInicio();
     else if (v === "entrenar") vistaEntrenar();
     else if (v === "ausencias") vistaAusencias();
+    else if (v === "mensajes") vistaMensajes();
     else if (v === "metas") vistaMetas();
     else if (v === "multas") vistaMultas();
     else vistaPerfil(false);
@@ -240,6 +244,7 @@
     const p = pareja();
     $("vista").innerHTML = `
       <h2 class="titulo">Hola, ${esc(perfil.nombre)}</h2>
+      <div id="inicio-mensajes"></div>
       <div id="por-responder-inicio"></div>
       <div id="marcador"><section class="tarjeta"><p class="vacio">Cargando marcador…</p></section></div>
       ${tarjetaParticipante(yo(), true)}
@@ -248,6 +253,7 @@
       ${tarjetaJuntos()}`;
     cargarPendientesJuntos($("inicio-pendientes"));
     cargarPorResponder($("por-responder-inicio"));
+    tarjetaMensajes($("inicio-mensajes"));
     const [mr, mu] = await Promise.all([db.rpc("marcador"), db.rpc("estado_multas")]);
     const data = mr.data, error = mr.error;
     if (error || !data) { $("marcador").innerHTML = ""; return avisar("No se pudo cargar el marcador: " + errorLegible(error) + ". ¿Ejecutaste fase3.sql?"); }
@@ -408,6 +414,10 @@
         ${esPrimeraVez ? "" : `<button type="button" id="btn-salir" class="secundario">Cerrar sesión</button>`}
       </form>`;
 
+    if (!esPrimeraVez) {
+      $("vista").insertAdjacentHTML("beforeend", `<section class="tarjeta" id="avisos"><p class="vacio">Cargando…</p></section>`);
+      pintarAvisos();
+    }
     $("btn-salir")?.addEventListener("click", salir);
     $("form-perfil").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1734,6 +1744,192 @@
   $("hoja").addEventListener("click", (e) => {
     if (e.target.closest("[data-cerrar-hoja]") && vistaActual === "multas") vistaMultas();
   });
+
+  // ================================================================ NOTIFICACIONES Y MENSAJES (fase 6)
+  const TIPOS_AVISO = [
+    ["mensajes", "💬 Mensajes de tu pareja"], ["solicitudes", "📝 Justificaciones, vetos, pausas y disputas"],
+    ["animo", "💗 Ánimo de tu pareja después de entrenar"], ["juntos", "💞 Confirmaciones de \"juntos\""],
+    ["entreno_previsto", "🏋️‍♀️ Entrenamiento previsto (8:00)"], ["meta_pendiente", "⏳ Meta pendiente (domingo 17:00)"],
+    ["multas", "💰 Multas y pagos"], ["sueno", "😴 Recordatorios de sueño"], ["lesion", "🩹 Seguimiento de lesiones"],
+    ["logros", "✨ Logros y rachas"], ["resumen", "📊 Resumen semanal (lunes)"], ["zona", "🛬 Cambios de zona horaria"]
+  ];
+  const instalada = () => window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+  const aUint8 = (b64) => {
+    const s = atob((b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from([...s].map((c) => c.charCodeAt(0)));
+  };
+
+  async function estadoPush() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return "no_soportado";
+    if (!instalada()) return "no_instalada";
+    if (Notification.permission === "denied") return "bloqueadas";
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    return sub && Notification.permission === "granted" ? "activas" : "inactivas";
+  }
+
+  async function activarPush(boton) {
+    try {
+      boton.disabled = true;
+      const permiso = await Notification.requestPermission();
+      if (permiso !== "granted") throw new Error("No diste permiso para las notificaciones.");
+      const { data: clave, error } = await db.rpc("clave_vapid");
+      if (error || !clave) throw new Error("Falta la clave pública de notificaciones en Supabase (paso 3 de las instrucciones).");
+      const reg = await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription()) ||
+        (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: aUint8(clave) }));
+      const j = sub.toJSON();
+      const r = await db.from("suscripciones_push").upsert(
+        { user_id: usuario.id, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+      if (r.error) throw r.error;
+      avisar("Notificaciones activadas en este iPhone. 🔔", "ok");
+    } catch (err) {
+      avisar(errorLegible(err));
+    } finally {
+      boton.disabled = false;
+      pintarAvisos();
+    }
+  }
+
+  async function desactivarPush() {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await db.from("suscripciones_push").delete().eq("endpoint", sub.endpoint);
+      await sub.unsubscribe();
+    }
+    avisar("Notificaciones desactivadas en este iPhone.", "ok");
+    pintarAvisos();
+  }
+
+  // Tarjeta de notificaciones dentro de Perfil
+  async function pintarAvisos() {
+    const cont = $("avisos");
+    if (!cont) return;
+    const est = await estadoPush();
+    const { data: prefs } = await db.from("preferencias_notificacion").select("tipo, activo").eq("user_id", usuario.id);
+    const off = new Set((prefs || []).filter((p) => !p.activo).map((p) => p.tipo));
+    const textos = {
+      no_soportado: "Este navegador no admite notificaciones.",
+      no_instalada: "Para recibir notificaciones, abre training.us desde el icono de tu pantalla de inicio.",
+      bloqueadas: "Las bloqueaste. Actívalas en Ajustes del iPhone → Notificaciones → training.us.",
+      inactivas: "Todavía no están activadas en este iPhone.",
+      activas: "Activadas en este iPhone. 🔔"
+    };
+    cont.innerHTML = `
+      <h3>Notificaciones</h3>
+      <p>${textos[est]}</p>
+      ${est === "inactivas" ? `<button type="button" class="boton-principal" data-push="activar" style="margin-top:14px">Activar notificaciones</button>` : ""}
+      ${est === "activas" ? `<div class="acciones-juntos"><button type="button" class="secundario" style="margin:0" data-push="probar">Enviar una prueba</button>
+        <button type="button" class="secundario" style="margin:0" data-push="desactivar">Desactivar</button></div>` : ""}
+      <span class="grupo-titulo" style="margin-top:20px">Qué avisos quieres recibir</span>
+      <div class="lista-interruptores">
+        ${TIPOS_AVISO.map(([k, n]) => `<label class="interruptor"><span>${n}</span><input type="checkbox" data-pref="${k}" ${off.has(k) ? "" : "checked"}></label>`).join("")}
+      </div>`;
+  }
+
+  async function accionesAvisos(e) {
+    const b = e.target.closest("[data-push]");
+    if (b) {
+      if (b.dataset.push === "activar") return activarPush(b);
+      if (b.dataset.push === "desactivar") return desactivarPush();
+      if (b.dataset.push === "probar") {
+        const r = await db.rpc("probar_notificacion");
+        if (r.error) return avisar(errorLegible(r.error));
+        return avisar("Prueba enviada: llegará en menos de un minuto.", "ok");
+      }
+    }
+  }
+  async function cambioPreferencia(e) {
+    const c = e.target.closest("[data-pref]");
+    if (!c) return;
+    const r = await db.from("preferencias_notificacion").upsert({ user_id: usuario.id, tipo: c.dataset.pref, activo: c.checked }, { onConflict: "user_id,tipo" });
+    if (r.error) { c.checked = !c.checked; avisar(errorLegible(r.error)); }
+  }
+  $("vista").addEventListener("click", accionesAvisos);
+  $("vista").addEventListener("change", cambioPreferencia);
+
+  // ---------- Mensajes
+  let canalMensajes = null;
+  const RAPIDOS = ["¡Bien hecho! 💪", "Tú puedes 💗", "Estoy orgullosa/o de ti ✨", "Vamos juntos 🏃", "Te quiero 💞", "Descansa bien 😴"];
+
+  async function tarjetaMensajes(cont) {
+    if (!cont) return;
+    const { data } = await db.rpc("resumen_mensajes");
+    const u = data?.ultimo;
+    const quien = u ? (u.sistema ? "training.us" : u.de === usuario.id ? "Tú" : esc(pareja()?.nombre || "")) : "";
+    cont.innerHTML = `
+      <button type="button" class="item" data-ir-mensajes style="margin-bottom:14px">
+        <span class="mini">💬</span>
+        <span><strong>Mensajes${data?.sin_leer ? ` <span class="burbuja-num">${data.sin_leer}</span>` : ""}</strong>
+          <span class="meta">${u ? `${quien}: ${esc(u.texto.slice(0, 70))}` : "Envíale ánimo a tu pareja"}</span></span>
+        <span class="lado">›</span>
+      </button>`;
+  }
+
+  async function vistaMensajes() {
+    vistaActual = "mensajes";
+    const otro = pareja();
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">Mensajes</h2><button type="button" data-accion="volver-inicio">Volver</button></div>
+      <div id="chat" class="chat"><p class="vacio">Cargando…</p></div>
+      <div class="chips rapidos">${RAPIDOS.map((t) => `<button type="button" data-rapido="${esc(t)}">${t}</button>`).join("")}</div>
+      <div class="escribir">
+        <textarea id="msg-texto" maxlength="1000" rows="1" placeholder="Escríbele a ${esc(otro?.nombre || "tu pareja")}…"></textarea>
+        <button type="button" id="msg-enviar" aria-label="Enviar">➤</button>
+      </div>`;
+    await cargarChat();
+    db.rpc("marcar_leidos");
+    if (!canalMensajes) {
+      canalMensajes = db.channel("mensajes-" + usuario.id)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensajes" }, () => {
+          if (vistaActual === "mensajes") { cargarChat(); db.rpc("marcar_leidos"); }
+        })
+        .subscribe();
+    }
+    $("msg-enviar").addEventListener("click", () => enviarMensaje($("msg-texto").value));
+  }
+
+  async function cargarChat() {
+    const { data, error } = await db.from("mensajes").select("*").order("creado_en", { ascending: false }).limit(80);
+    if (error) return avisar(errorLegible(error));
+    const chat = $("chat");
+    if (!chat) return;
+    const temaYo = yo()?.tema || "rosa", temaOtro = pareja()?.tema || "azul";
+    const lista = [...data].reverse();
+    chat.innerHTML = lista.length ? lista.map((m) => {
+      const hora = new Date(m.creado_en).toLocaleString("es", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      if (m.sistema) return `<div class="msg sistema"><span>${esc(m.texto)}</span><small>${hora}</small></div>`;
+      const mio = m.de === usuario.id;
+      return `<div class="msg ${mio ? "mio " + temaYo : "suyo " + temaOtro}"><span>${esc(m.texto)}</span><small>${hora}${mio && m.leido_en ? " · Leído" : ""}</small></div>`;
+    }).join("") : `<p class="vacio">Todavía no hay mensajes. ¡Escríbele algo bonito!</p>`;
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  async function enviarMensaje(texto) {
+    texto = (texto || "").trim();
+    if (!texto) return;
+    const r = await db.from("mensajes").insert({ de: usuario.id, para: pareja()?.id, texto });
+    if (r.error) return avisar(errorLegible(r.error));
+    if ($("msg-texto")) $("msg-texto").value = "";
+    cargarChat();
+  }
+
+  $("vista").addEventListener("click", (e) => {
+    if (e.target.closest("[data-ir-mensajes]")) return vistaMensajes();
+    if (e.target.closest('[data-accion="volver-inicio"]')) return irA("inicio");
+    const rap = e.target.closest("[data-rapido]");
+    if (rap) return enviarMensaje(rap.dataset.rapido);
+  });
+
+  // Abrir la sección indicada por una notificación (#mensajes, #multas…)
+  function abrirDesdeUrl(url) {
+    const destino = (String(url || "").split("#")[1] || "").trim();
+    if (!destino || !estado || !perfil?.completado) return;
+    if (destino === "mensajes") return vistaMensajes();
+    if (["inicio", "entrenar", "metas", "multas", "perfil", "ausencias"].includes(destino)) irA(destino);
+  }
+  navigator.serviceWorker?.addEventListener("message", (e) => { if (e.data?.tipo === "abrir") abrirDesdeUrl(e.data.url); });
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
