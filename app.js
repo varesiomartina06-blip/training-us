@@ -165,7 +165,9 @@
       if (b.dataset.vista === v) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
     window.scrollTo(0, 0);
+    if (!$("hoja").hidden) cerrarHoja();
     if (v === "inicio") vistaInicio();
+    else if (v === "entrenar") vistaEntrenar();
     else if (v === "metas") vistaMetas();
     else vistaPerfil(false);
   }
@@ -179,14 +181,18 @@
     const nombre = esc(p.nombre || "Sin nombre todavía");
     const meta = p.meta_mes;
     const sem = p.meta_semana;
-    const dias = sem ? DIAS.map((d, i) =>
-      `<span class="dia ${sem.dias_previstos.includes(i + 1) ? "on" : ""}" aria-label="${d}">${d}</span>`).join("") : "";
+    const hechos = p.dias_entrenados || [];
+    const dias = DIAS.map((d, i) => {
+      const prev = sem?.dias_previstos.includes(i + 1), hecho = hechos.includes(i + 1);
+      return `<span class="dia ${prev ? "on" : ""} ${hecho ? "hecho" : ""} ${hecho && !prev ? "extra" : ""}" aria-label="${d}${hecho ? ", entrenado" : prev ? ", previsto" : ""}">${hecho ? "✓" : d}</span>`;
+    }).join("");
     const zonaTxt = nombreZona(p.zona);
     return `
       <section class="tarjeta ${tema}">
         <h3 class="nombre-${tema}">${nombre}${esYo ? " (tú)" : ""}</h3>
-        <p>${meta ? `Meta: ${meta.entrenos_semana} entrenamientos por semana` : "Todavía sin metas del mes"}</p>
-        ${sem ? `<div class="dias">${dias}</div>` : `<p>Sin días previstos esta semana</p>`}
+        <p>${meta ? `${Math.min(hechos.length, meta.entrenos_semana)} de ${meta.entrenos_semana} días con entrenamiento esta semana` : "Todavía sin metas del mes"}</p>
+        <div class="dias">${dias}</div>
+        ${sem ? "" : `<p>Sin días previstos esta semana</p>`}
         <p>Hora de ${esc(zonaTxt)}</p>
         ${!p.completado ? `<p>Aún no ha completado su perfil.</p>` : ""}
         ${p.zona_pendiente ? `<div class="aviso">Cambio a hora de ${esc(nombreZona(p.zona_pendiente.zona))} desde el ${fechaCorta(p.zona_pendiente.desde)}.</div>` : ""}
@@ -226,7 +232,9 @@
       <p class="sub">${inicio} El marcador de la competencia aparecerá aquí en la fase 3.</p>
       ${tarjetaParticipante(yo(), true)}
       ${p ? tarjetaParticipante(p, false) : ""}
+      <div id="inicio-pendientes"></div>
       ${tarjetaJuntos()}`;
+    cargarPendientesJuntos($("inicio-pendientes"));
   }
 
   $("vista").addEventListener("click", async (e) => {
@@ -551,6 +559,507 @@
         <p class="duracion" id="${id1}-dur"></p>
       </div>`;
   }
+
+  // ================================================================ ENTRENAMIENTOS (fase 2)
+  const TIPOS = [
+    ["musculacion", "🏋️‍♀️", "Musculación"], ["funcional", "⚡", "Funcional"], ["correr", "🏃", "Correr"],
+    ["natacion", "🏊", "Natación"], ["ciclismo", "🚴", "Ciclismo"], ["senderismo", "🥾", "Senderismo"],
+    ["caminadora", "⛰️", "Caminadora inclinada"], ["escalada", "🧗", "Escalada"], ["yoga", "🧘", "Yoga"],
+    ["pilates", "🤸‍♀️", "Pilates"], ["otro", "✨", "Otro"]
+  ];
+  const TIPO = Object.fromEntries(TIPOS.map(([k, e, n]) => [k, { emoji: e, nombre: n }]));
+  const CON_DISTANCIA = ["correr", "natacion", "ciclismo", "senderismo", "caminadora"];
+  const CON_ZONAS = ["musculacion", "funcional"];
+  const ZONAS_CUERPO = [["upper", "Upper body"], ["lower", "Lower body"], ["full", "Cuerpo completo"], ["pecho", "Pecho"],
+    ["espalda", "Espalda"], ["hombros", "Hombros"], ["brazos", "Brazos"], ["core", "Core"], ["gluteos", "Glúteos"], ["piernas", "Piernas"]];
+  const ZONA_NOMBRE = Object.fromEntries(ZONAS_CUERPO);
+  const ANIMOS = [["satisfecho", "😌", "Satisfecho"], ["feliz", "😄", "Feliz"], ["decepcionado", "😞", "Decepcionado"],
+    ["frustrado", "😤", "Frustrado"], ["agotado", "🫠", "Agotado"]];
+  const ANIMO = Object.fromEntries(ANIMOS.map(([k, e, n]) => [k, { emoji: e, nombre: n }]));
+  const MET = { musculacion: 5.0, funcional: 6.0, natacion: 7.0, senderismo: 6.0, caminadora: 6.0, escalada: 7.5, yoga: 2.5, pilates: 3.0, otro: 4.0 };
+
+  // Calorías estimadas con la fórmula MET: kcal = MET × peso (kg) × horas
+  function estimarKcal(tipo, minutos, km, pesoKg) {
+    if (!tipo || !minutos || !pesoKg) return null;
+    let met = MET[tipo];
+    const kmh = km ? km / (minutos / 60) : null;
+    if (tipo === "correr") met = kmh ? Math.min(16, Math.max(6, kmh)) : 9;
+    if (tipo === "ciclismo") met = !kmh ? 7.5 : kmh < 16 ? 4 : kmh < 19 ? 6.8 : kmh < 22 ? 8 : 10;
+    return Math.round(met * pesoKg * (minutos / 60));
+  }
+
+  function idYoutube(texto) {
+    const m = String(texto || "").match(/(?:youtu\.be\/|v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+    if (m) return m[1];
+    return /^[A-Za-z0-9_-]{11}$/.test(String(texto || "").trim()) ? texto.trim() : null;
+  }
+  async function datosYoutube(id) {
+    const url = encodeURIComponent("https://www.youtube.com/watch?v=" + id);
+    for (const fuente of [`https://www.youtube.com/oembed?format=json&url=${url}`, `https://noembed.com/embed?url=${url}`]) {
+      try {
+        const r = await fetch(fuente);
+        if (r.ok) { const j = await r.json(); if (j.title) return { titulo: j.title, canal: j.author_name || null }; }
+      } catch (_) { /* se intenta la siguiente fuente */ }
+    }
+    return null;
+  }
+  const miniaturaYoutube = (id) => `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+  const enlaceYoutube = (id) => `https://www.youtube.com/watch?v=${id}`;
+
+  // Compresión de fotos en el teléfono antes de subirlas
+  async function comprimir(file, maxLado, calidad) {
+    let fuente;
+    try { fuente = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+    catch (_) {
+      fuente = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = URL.createObjectURL(file); });
+    }
+    const w = fuente.width, h = fuente.height, k = Math.min(1, maxLado / Math.max(w, h));
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * k); c.height = Math.round(h * k);
+    c.getContext("2d").drawImage(fuente, 0, 0, c.width, c.height);
+    return new Promise((ok) => c.toBlob(ok, "image/jpeg", calidad));
+  }
+
+  async function urlsFirmadas(rutas) {
+    if (!rutas.length) return {};
+    const { data } = await db.storage.from("evidencias").createSignedUrls(rutas, 3600);
+    return Object.fromEntries((data || []).filter((x) => x.signedUrl).map((x) => [x.path, x.signedUrl]));
+  }
+
+  const etiquetaFecha = (iso) => {
+    const hoy = yo().hoy;
+    if (iso === hoy) return "Hoy";
+    if (iso === sumarDias(hoy, -1)) return "Ayer";
+    return fmt(iso, { weekday: "short", day: "numeric", month: "short" });
+  };
+
+  function resumenEntreno(e) {
+    const partes = [`${e.duracion_min} min`];
+    if (e.distancia_km) partes.push(`${Number(e.distancia_km)} km`);
+    if (e.zonas?.length) partes.push(e.zonas.map((z) => ZONA_NOMBRE[z] || z).join(", "));
+    return partes.join(" · ");
+  }
+  const nombreTipo = (e) => e.tipo === "otro" ? (e.tipo_otro || "Otro") : TIPO[e.tipo].nombre;
+
+  // ---------- Vista Entrenar
+  let entrenarDe = "yo";
+  async function vistaEntrenar() {
+    const y = yo(), p = pareja();
+    const meta = y.meta_mes?.entrenos_semana || 0;
+    const dias = (y.dias_entrenados || []).length;
+    const pct = meta ? Math.min(100, Math.round((dias / meta) * 100)) : 0;
+    $("vista").innerHTML = `
+      <h2 class="titulo">Entrenar</h2>
+      <p class="sub">Semana del ${fechaCorta(y.semana_actual)}</p>
+      <section class="tarjeta">
+        <h3>Esta semana</h3>
+        <div class="cifra">${Math.min(dias, meta || dias)}<small> de ${meta || "—"} días con entrenamiento</small></div>
+        <div class="progreso"><span style="width:${pct}%"></span></div>
+        <p>${y.entrenos_semana ?? 0} entrenamiento${y.entrenos_semana === 1 ? "" : "s"} registrado${y.entrenos_semana === 1 ? "" : "s"}${dias > meta && meta ? ` · ${dias - meta} día${dias - meta === 1 ? "" : "s"} adicional${dias - meta === 1 ? "" : "es"}` : ""}. El conteo oficial de puntos llega en la fase 3.</p>
+        <button type="button" class="boton-principal" data-accion="registrar" style="margin-top:16px">Registrar entrenamiento</button>
+      </section>
+      <div id="pendientes-juntos"></div>
+      <div class="segmentado" role="group" aria-label="Ver entrenamientos de">
+        <button type="button" data-ver="yo" aria-pressed="${entrenarDe === "yo"}">Mi semana</button>
+        <button type="button" data-ver="pareja" aria-pressed="${entrenarDe === "pareja"}">${esc(p?.nombre || "Pareja")}</button>
+      </div>
+      <div id="lista-entrenos" class="lista"><p class="vacio">Cargando…</p></div>
+      <h3 style="margin:26px 0 10px">Rutinas de YouTube</h3>
+      <div id="lista-rutinas" class="lista"><p class="vacio">Cargando…</p></div>`;
+    cargarListaEntrenos();
+    cargarPendientesJuntos($("pendientes-juntos"));
+    cargarRutinas();
+  }
+
+  async function cargarListaEntrenos() {
+    const quien = entrenarDe === "yo" ? yo() : pareja();
+    const cont = $("lista-entrenos");
+    if (!quien) { cont.innerHTML = ""; return; }
+    const { data, error } = await db.from("entrenos")
+      .select("*, evidencias(ruta, miniatura), rutinas_youtube(video_id, titulo)")
+      .eq("user_id", quien.id).eq("estado", "completado")
+      .gte("fecha", quien.semana_actual).lte("fecha", sumarDias(quien.semana_actual, 6))
+      .order("fecha", { ascending: false }).order("hora", { ascending: false });
+    if (error) { cont.innerHTML = ""; return avisar(errorLegible(error)); }
+    if (!data.length) {
+      cont.innerHTML = `<p class="vacio">${entrenarDe === "yo" ? "Todavía no registraste entrenamientos esta semana." : "Aún no hay entrenamientos esta semana."}</p>`;
+      return;
+    }
+    const urls = await urlsFirmadas(data.map((e) => e.evidencias[0]?.miniatura).filter(Boolean));
+    cont.innerHTML = data.map((e) => {
+      const mini = e.evidencias[0] ? urls[e.evidencias[0].miniatura] : null;
+      return `
+      <button type="button" class="item" data-entreno="${e.id}">
+        <span class="mini" ${mini ? `style="background-image:url('${mini}')"` : ""}>${mini ? "" : TIPO[e.tipo].emoji}</span>
+        <span><strong>${TIPO[e.tipo].emoji} ${esc(nombreTipo(e))}</strong>
+          <span class="meta">${etiquetaFecha(e.fecha)}${e.hora ? " · " + e.hora.slice(0, 5) : ""} · ${esc(resumenEntreno(e))}</span>
+          ${e.juntos === "confirmado" ? `<span class="etiqueta">💞 Juntos</span>` : e.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : ""}
+          ${e.recuperacion ? `<span class="etiqueta">En recuperación</span>` : ""}
+        </span>
+        <span class="lado">${e.animo ? ANIMO[e.animo].emoji : ""}</span>
+      </button>`;
+    }).join("");
+  }
+
+  async function cargarPendientesJuntos(cont) {
+    const p = pareja();
+    if (!p || !cont) return;
+    const { data } = await db.from("entrenos").select("id, tipo, tipo_otro, fecha, duracion_min")
+      .eq("user_id", p.id).eq("juntos", "pendiente").eq("estado", "completado")
+      .gte("fecha", sumarDias(yo().hoy, -3));
+    if (!data?.length) { cont.innerHTML = ""; return; }
+    cont.innerHTML = data.map((e) => `
+      <section class="tarjeta">
+        <h3>¿Entrenaron juntos?</h3>
+        <p>${esc(p.nombre)} registró ${TIPO[e.tipo].emoji} ${esc(nombreTipo(e))} (${e.duracion_min} min, ${etiquetaFecha(e.fecha).toLowerCase()}) como entrenamiento juntos.</p>
+        <div class="acciones-juntos">
+          <button type="button" data-entreno-juntos="si" data-id="${e.id}">Confirmar</button>
+          <button type="button" class="secundario" style="margin:0" data-entreno-juntos="no" data-id="${e.id}">No fue juntos</button>
+        </div>
+      </section>`).join("");
+  }
+
+  async function cargarRutinas() {
+    const cont = $("lista-rutinas");
+    const { data, error } = await db.from("rutinas_youtube").select("*").eq("user_id", usuario.id)
+      .order("favorito", { ascending: false }).order("creado_en", { ascending: false }).limit(12);
+    if (error) { cont.innerHTML = ""; return; }
+    if (!data.length) {
+      cont.innerHTML = `<p class="vacio">Cuando registres un entrenamiento con un enlace de YouTube, la rutina se guardará aquí para repetirla.</p>`;
+      return;
+    }
+    cont.innerHTML = data.map((r) => `
+      <div class="tarjeta" style="margin:0">
+        <div class="yt">
+          <img src="${miniaturaYoutube(r.video_id)}" alt="" loading="lazy">
+          <div>
+            <strong>${esc(r.titulo || "Rutina sin título")}</strong>
+            <div class="estrellas" role="group" aria-label="Calificación">
+              ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="${(r.calificacion || 0) >= n ? "on" : ""}" data-rutina-cal="${n}" data-id="${r.id}" aria-label="${n} de 5">★</button>`).join("")}
+            </div>
+          </div>
+        </div>
+        <div class="acciones-fila">
+          <a href="${enlaceYoutube(r.video_id)}" target="_blank" rel="noopener">▶ Abrir</a>
+          <button type="button" data-rutina-usar="${r.id}">Usar en un entrenamiento</button>
+          <button type="button" data-rutina-fav="${r.id}" data-fav="${r.favorito}">${r.favorito ? "♥ Favorita" : "♡ Favorita"}</button>
+        </div>
+      </div>`).join("");
+  }
+
+  // ---------- Registrar entrenamiento
+  async function vistaRegistrar(rutinaInicial) {
+    vistaActual = "registrar";
+    const y = yo();
+    const ahora = new Date();
+    const ayerPermitido = ahora.getHours() < 12 || antesDelInicio();
+    const f = { tipo: null, fecha: y.hoy, zonas: new Set(), animo: null, recuperacion: null, fotos: [] };
+    const [pesoR, rutinasR] = await Promise.all([
+      db.from("mediciones").select("peso_kg").eq("user_id", usuario.id).not("peso_kg", "is", null).order("fecha", { ascending: false }).limit(1),
+      db.from("rutinas_youtube").select("id, video_id, titulo").eq("user_id", usuario.id).order("favorito", { ascending: false }).order("creado_en", { ascending: false })
+    ]);
+    const peso = pesoR.data?.[0]?.peso_kg ? Number(pesoR.data[0].peso_kg) : null;
+    const rutinas = rutinasR.data || [];
+    const hora = String(ahora.getHours()).padStart(2, "0") + ":" + String(ahora.getMinutes()).padStart(2, "0");
+
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">Registrar</h2><button type="button" data-accion="volver-entrenar">Cancelar</button></div>
+      <p class="sub">Sin al menos una foto de evidencia no se puede guardar.</p>
+
+      <section class="tarjeta">
+        <span class="grupo-titulo">Tipo de entrenamiento</span>
+        <div class="tipos" id="rg-tipos">${TIPOS.map(([k, e, n]) => `<button type="button" data-tipo="${k}" aria-pressed="false"><span>${e}</span>${n}</button>`).join("")}</div>
+        <div id="rg-otro" class="campo" hidden style="margin-top:14px"><label for="rg-otro-nombre">¿Qué actividad?</label><input id="rg-otro-nombre" maxlength="60"></div>
+      </section>
+
+      <section class="tarjeta">
+        <span class="grupo-titulo">Cuándo</span>
+        <div class="opciones campo">
+          <label><input type="radio" name="rg-fecha" value="${y.hoy}" checked><span>Hoy</span></label>
+          ${ayerPermitido ? `<label><input type="radio" name="rg-fecha" value="${sumarDias(y.hoy, -1)}"><span>Ayer</span></label>` : ""}
+        </div>
+        <div class="fila">
+          <div><label for="rg-hora">Hora</label><input id="rg-hora" type="time" value="${hora}"></div>
+          <div><label for="rg-duracion">Duración (min)</label><input id="rg-duracion" type="number" inputmode="numeric" min="1" max="600"></div>
+        </div>
+        <p class="ayuda" id="rg-aviso-duracion"></p>
+        <div id="rg-distancia" class="campo" hidden style="margin-top:14px"><label for="rg-km">Distancia (km)</label><input id="rg-km" type="number" inputmode="decimal" min="0" step="0.01"></div>
+        <div id="rg-zonas" hidden style="margin-top:14px"><span class="grupo-titulo">Zonas trabajadas</span>
+          <div class="chips">${ZONAS_CUERPO.map(([k, n]) => `<button type="button" data-zona="${k}" aria-pressed="false">${n}</button>`).join("")}</div></div>
+        <div class="kcal" id="rg-kcal" hidden></div>
+      </section>
+
+      <section class="tarjeta">
+        <span class="grupo-titulo">Evidencia (1 a 3 fotos)</span>
+        <div class="fotos" id="rg-fotos"></div>
+      </section>
+
+      <section class="tarjeta">
+        <span class="grupo-titulo">Rutina de YouTube (opcional)</span>
+        ${rutinas.length ? `<select id="rg-rutina" class="campo"><option value="">Ninguna o un enlace nuevo</option>${rutinas.map((r) => `<option value="${r.id}" ${rutinaInicial == r.id ? "selected" : ""}>${esc(r.titulo || r.video_id)}</option>`).join("")}</select>` : ""}
+        <div id="rg-yt-nuevo">
+          <label for="rg-yt">Enlace del video</label>
+          <input id="rg-yt" type="url" inputmode="url" placeholder="https://youtu.be/…" autocapitalize="off">
+          <div id="rg-yt-info" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <section class="tarjeta">
+        <label class="interruptor"><span>Entrenamos juntos</span><input id="rg-juntos" type="checkbox"></label>
+        <p class="ayuda">Tu pareja tendrá que confirmarlo.</p>
+        <span class="grupo-titulo" style="margin-top:18px">¿Entrenas en recuperación?</span>
+        <div class="chips" id="rg-recuperacion">
+          <button type="button" data-rec="" aria-pressed="true">No</button>
+          <button type="button" data-rec="lesion" aria-pressed="false">De una lesión</button>
+          <button type="button" data-rec="enfermedad" aria-pressed="false">De una enfermedad</button>
+        </div>
+        <div class="campo" style="margin-top:18px"><label for="rg-notas">Notas</label><textarea id="rg-notas" maxlength="1000" placeholder="Ejercicios, pesos, sensaciones…"></textarea></div>
+      </section>
+
+      <section class="tarjeta">
+        <span class="grupo-titulo">¿Cómo te sientes? (opcional)</span>
+        <div class="chips" id="rg-animo">${ANIMOS.map(([k, e, n]) => `<button type="button" data-animo="${k}" aria-pressed="false">${e} ${n}</button>`).join("")}</div>
+        <div class="campo" id="rg-animo-nota-c" hidden style="margin-top:14px"><label for="rg-animo-nota">¿Por qué te sientes así?</label><textarea id="rg-animo-nota" maxlength="500"></textarea></div>
+      </section>
+
+      <button type="button" id="rg-guardar" class="boton-principal">Guardar entrenamiento</button>
+      <button type="button" class="secundario" data-accion="volver-entrenar">Cancelar</button>`;
+
+    const pulsar = (cont, sel, valor, multiple) => cont.querySelectorAll(sel).forEach((b) => {
+      if (!multiple) b.setAttribute("aria-pressed", b === valor);
+    });
+
+    // Tipo
+    $("rg-tipos").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-tipo]"); if (!b) return;
+      f.tipo = b.dataset.tipo;
+      pulsar($("rg-tipos"), "button", b);
+      $("rg-otro").hidden = f.tipo !== "otro";
+      $("rg-distancia").hidden = !CON_DISTANCIA.includes(f.tipo);
+      $("rg-zonas").hidden = !CON_ZONAS.includes(f.tipo);
+      calcular();
+    });
+    // Zonas
+    $("rg-zonas").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-zona]"); if (!b) return;
+      f.zonas.has(b.dataset.zona) ? f.zonas.delete(b.dataset.zona) : f.zonas.add(b.dataset.zona);
+      b.setAttribute("aria-pressed", f.zonas.has(b.dataset.zona));
+    });
+    // Recuperación y ánimo
+    $("rg-recuperacion").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-rec]"); if (!b) return;
+      f.recuperacion = b.dataset.rec || null; pulsar($("rg-recuperacion"), "button", b);
+    });
+    $("rg-animo").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-animo]"); if (!b) return;
+      f.animo = f.animo === b.dataset.animo ? null : b.dataset.animo;
+      $("rg-animo").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.animo === f.animo));
+      $("rg-animo-nota-c").hidden = !f.animo;
+    });
+
+    // Calorías y aviso de duración
+    function calcular() {
+      const min = Number($("rg-duracion").value) || 0;
+      const aviso = $("rg-aviso-duracion");
+      aviso.textContent = min && min < 20 ? "Con menos de 20 minutos se guarda, pero no cuenta para tu meta semanal." : "";
+      const kcal = estimarKcal(f.tipo, min, Number($("rg-km").value) || null, peso);
+      $("rg-kcal").hidden = !kcal;
+      if (kcal) $("rg-kcal").textContent = `🔒 Aproximadamente ${kcal} kcal quemadas (estimación privada).`;
+    }
+    $("rg-duracion").addEventListener("input", calcular);
+    $("rg-km").addEventListener("input", calcular);
+
+    // Fotos
+    function pintarFotos() {
+      $("rg-fotos").innerHTML = f.fotos.map((x, i) => `<div class="foto" style="background-image:url('${x.url}')"><button type="button" data-quitar="${i}" aria-label="Quitar foto">×</button></div>`).join("") +
+        (f.fotos.length < 3 ? `<label class="agregar-foto"><input type="file" accept="image/*" multiple id="rg-archivo">📷<br>Agregar foto</label>` : "");
+      $("rg-archivo")?.addEventListener("change", (e) => {
+        for (const file of [...e.target.files].slice(0, 3 - f.fotos.length)) f.fotos.push({ file, url: URL.createObjectURL(file) });
+        pintarFotos();
+      });
+    }
+    $("rg-fotos").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-quitar]"); if (!b) return;
+      f.fotos.splice(Number(b.dataset.quitar), 1); pintarFotos();
+    });
+    pintarFotos();
+
+    // YouTube
+    let yt = null; // { id, titulo, canal }
+    const ytSel = $("rg-rutina");
+    const actualizarYt = () => { $("rg-yt-nuevo").hidden = !!(ytSel && ytSel.value); };
+    ytSel?.addEventListener("change", actualizarYt); actualizarYt();
+    let tYt;
+    $("rg-yt").addEventListener("input", () => {
+      clearTimeout(tYt);
+      tYt = setTimeout(async () => {
+        const id = idYoutube($("rg-yt").value);
+        const info = $("rg-yt-info");
+        if (!id) { yt = null; info.innerHTML = $("rg-yt").value ? `<p class="ayuda">No reconozco ese enlace de YouTube.</p>` : ""; return; }
+        info.innerHTML = `<p class="ayuda">Buscando el video…</p>`;
+        const d = await datosYoutube(id);
+        yt = { id, titulo: d?.titulo || "", canal: d?.canal || null };
+        info.innerHTML = `<div class="yt"><img src="${miniaturaYoutube(id)}" alt=""><div>
+          <label for="rg-yt-titulo" style="font-weight:500;font-size:.85rem;color:var(--texto-suave)">Título</label>
+          <input id="rg-yt-titulo" maxlength="200" value="${esc(yt.titulo)}" placeholder="Nombre de la rutina"></div></div>`;
+      }, 400);
+    });
+
+    // Guardar
+    $("rg-guardar").addEventListener("click", async (ev) => {
+      const boton = ev.target;
+      const duracion = Number($("rg-duracion").value);
+      if (!f.tipo) return avisar("Elige el tipo de entrenamiento.");
+      if (f.tipo === "otro" && !$("rg-otro-nombre").value.trim()) return avisar("Escribe qué actividad hiciste.");
+      if (!(duracion >= 1 && duracion <= 600)) return avisar("Escribe la duración en minutos.");
+      if (!f.fotos.length) return avisar("Agrega al menos una foto de evidencia.");
+      const fecha = document.querySelector('input[name="rg-fecha"]:checked').value;
+      const km = CON_DISTANCIA.includes(f.tipo) && $("rg-km").value ? Number($("rg-km").value) : null;
+      boton.disabled = true;
+      const paso = (t) => (boton.textContent = t);
+      let entrenoId = null;
+      try {
+        // 1. Rutina de YouTube
+        let rutinaId = ytSel?.value ? Number(ytSel.value) : null;
+        if (!rutinaId && yt) {
+          const titulo = $("rg-yt-titulo")?.value.trim() || yt.titulo || null;
+          const r = await db.from("rutinas_youtube")
+            .upsert({ user_id: usuario.id, video_id: yt.id, titulo, canal: yt.canal }, { onConflict: "user_id,video_id" })
+            .select("id").single();
+          if (r.error) throw r.error;
+          rutinaId = r.data.id;
+        }
+        // 2. Entrenamiento como borrador
+        paso("Guardando…");
+        const r1 = await db.from("entrenos").insert({
+          user_id: usuario.id, fecha, hora: $("rg-hora").value || null, duracion_min: duracion,
+          tipo: f.tipo, tipo_otro: f.tipo === "otro" ? $("rg-otro-nombre").value.trim() : null,
+          distancia_km: km, zonas: CON_ZONAS.includes(f.tipo) ? [...f.zonas] : [],
+          notas: $("rg-notas").value.trim() || null, rutina_id: rutinaId,
+          juntos: $("rg-juntos").checked ? "pendiente" : "no",
+          animo: f.animo, animo_nota: f.animo ? ($("rg-animo-nota").value.trim() || null) : null,
+          recuperacion: f.recuperacion
+        }).select("id").single();
+        if (r1.error) throw r1.error;
+        entrenoId = r1.data.id;
+        // 3. Fotos comprimidas + miniaturas
+        for (let i = 0; i < f.fotos.length; i++) {
+          paso(`Subiendo foto ${i + 1} de ${f.fotos.length}…`);
+          const base = `${usuario.id}/${entrenoId}/${Date.now()}-${i}`;
+          const [grande, mini] = await Promise.all([comprimir(f.fotos[i].file, 1280, 0.72), comprimir(f.fotos[i].file, 360, 0.7)]);
+          for (const [ruta, blob] of [[base + ".jpg", grande], [base + "-mini.jpg", mini]]) {
+            const up = await db.storage.from("evidencias").upload(ruta, blob, { contentType: "image/jpeg", upsert: false });
+            if (up.error) throw up.error;
+          }
+          const ev = await db.from("evidencias").insert({ entreno_id: entrenoId, user_id: usuario.id, ruta: base + ".jpg", miniatura: base + "-mini.jpg" });
+          if (ev.error) throw ev.error;
+        }
+        // 4. Completar
+        paso("Completando…");
+        const r2 = await db.from("entrenos").update({ estado: "completado" }).eq("id", entrenoId);
+        if (r2.error) throw r2.error;
+        // 5. Calorías privadas
+        const kcal = estimarKcal(f.tipo, duracion, km, peso);
+        if (kcal) await db.from("entrenos_privado").insert({ entreno_id: entrenoId, user_id: usuario.id, kcal_est: kcal });
+        avisar("Entrenamiento guardado. ¡Bien hecho! 💪", "ok");
+        await recargarEstado();
+        irA("entrenar");
+      } catch (err) {
+        if (entrenoId) await db.from("entrenos").delete().eq("id", entrenoId);
+        boton.disabled = false; paso("Guardar entrenamiento");
+        avisar("No se pudo guardar: " + errorLegible(err));
+      }
+    });
+  }
+
+  // ---------- Detalle (hoja inferior)
+  function abrirHoja(html) {
+    $("hoja-contenido").innerHTML = `<div class="asa"></div>` + html;
+    $("hoja").hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+  function cerrarHoja() {
+    $("hoja").hidden = true;
+    document.body.style.overflow = "";
+  }
+  $("hoja").addEventListener("click", (e) => {
+    if (e.target === $("hoja") || e.target.closest("[data-cerrar-hoja]")) cerrarHoja();
+  });
+
+  async function verEntreno(id) {
+    const { data: e, error } = await db.from("entrenos")
+      .select("*, evidencias(ruta), rutinas_youtube(video_id, titulo), entrenos_privado(kcal_est)").eq("id", id).single();
+    if (error) return avisar(errorLegible(error));
+    const urls = await urlsFirmadas(e.evidencias.map((x) => x.ruta));
+    const esMio = e.user_id === usuario.id;
+    const duenio = estado.participantes.find((x) => x.id === e.user_id);
+    const editable = esMio && (e.fecha === yo().hoy || antesDelInicio() || (e.fecha === sumarDias(yo().hoy, -1) && new Date().getHours() < 12));
+    const kcal = Array.isArray(e.entrenos_privado) ? e.entrenos_privado[0]?.kcal_est : e.entrenos_privado?.kcal_est;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">${TIPO[e.tipo].emoji} ${esc(nombreTipo(e))}</h2>
+        <button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub" style="margin-bottom:8px">${esc(duenio?.nombre || "")} · ${etiquetaFecha(e.fecha)}${e.hora ? " · " + e.hora.slice(0, 5) : ""}</p>
+      <p style="margin:0">${esc(resumenEntreno(e))}</p>
+      ${e.juntos === "confirmado" ? `<span class="etiqueta">💞 Entrenaron juntos</span>` : e.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : e.juntos === "rechazado" ? `<span class="etiqueta">Juntos: no confirmado</span>` : ""}
+      ${e.recuperacion ? `<span class="etiqueta">En recuperación de ${e.recuperacion === "lesion" ? "una lesión" : "una enfermedad"}</span>` : ""}
+      ${e.duracion_min < 20 ? `<span class="etiqueta">Menos de 20 min: no cuenta para la meta</span>` : ""}
+      <div class="galeria">${e.evidencias.map((x) => urls[x.ruta] ? `<img src="${urls[x.ruta]}" alt="Evidencia">` : "").join("")}</div>
+      ${e.animo ? `<section class="tarjeta"><h3>${ANIMO[e.animo].emoji} ${ANIMO[e.animo].nombre}</h3>${e.animo_nota ? `<p>${esc(e.animo_nota)}</p>` : ""}</section>` : ""}
+      ${e.rutinas_youtube ? `<section class="tarjeta"><div class="yt"><img src="${miniaturaYoutube(e.rutinas_youtube.video_id)}" alt=""><div><strong>${esc(e.rutinas_youtube.titulo || "Rutina de YouTube")}</strong>
+        <div class="acciones-fila"><a href="${enlaceYoutube(e.rutinas_youtube.video_id)}" target="_blank" rel="noopener">▶ Abrir</a></div></div></div></section>` : ""}
+      ${e.notas ? `<section class="tarjeta"><h3>Notas</h3><p>${esc(e.notas)}</p></section>` : ""}
+      ${esMio && kcal ? `<div class="kcal">🔒 Aproximadamente ${kcal} kcal quemadas (solo tú lo ves).</div>` : ""}
+      ${!esMio && e.juntos === "pendiente" ? `<div class="acciones-juntos"><button type="button" data-entreno-juntos="si" data-id="${e.id}">Confirmar que fue juntos</button>
+        <button type="button" class="secundario" style="margin:0" data-entreno-juntos="no" data-id="${e.id}">No fue juntos</button></div>` : ""}
+      ${editable ? `<button type="button" class="secundario" data-borrar-entreno="${e.id}" style="margin-top:20px;color:var(--error)">Eliminar entrenamiento</button>` : ""}`);
+  }
+
+  async function recargarEstado() {
+    const r = await db.rpc("estado_general");
+    if (!r.error) estado = r.data;
+  }
+
+  // ---------- Acciones de entrenamientos (vista y hoja)
+  async function accionesEntrenos(e) {
+    const t = e.target;
+    const reg = t.closest("[data-accion]");
+    if (reg?.dataset.accion === "registrar") return vistaRegistrar();
+    if (reg?.dataset.accion === "volver-entrenar") return irA("entrenar");
+    const ver = t.closest("[data-ver]");
+    if (ver) { entrenarDe = ver.dataset.ver; return vistaEntrenar(); }
+    const item = t.closest("[data-entreno]");
+    if (item) return verEntreno(Number(item.dataset.entreno));
+    const jb = t.closest("[data-entreno-juntos]");
+    if (jb) {
+      jb.disabled = true;
+      const r = await db.rpc("responder_entreno_juntos", { p_entreno: Number(jb.dataset.id), p_acepta: jb.dataset.entrenoJuntos === "si" });
+      if (r.error) { jb.disabled = false; return avisar(errorLegible(r.error)); }
+      avisar(r.data === "confirmado" ? "Confirmado: entrenaron juntos. 💞" : "Anotado.", "ok");
+      cerrarHoja(); await recargarEstado(); return irA(vistaActual === "registrar" ? "entrenar" : vistaActual);
+    }
+    const borrar = t.closest("[data-borrar-entreno]");
+    if (borrar) {
+      if (!confirm("¿Eliminar este entrenamiento? No se puede deshacer.")) return;
+      const r = await db.from("entrenos").delete().eq("id", Number(borrar.dataset.borrarEntreno));
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Entrenamiento eliminado.", "ok"); await recargarEstado(); return irA("entrenar");
+    }
+    const cal = t.closest("[data-rutina-cal]");
+    if (cal) {
+      await db.from("rutinas_youtube").update({ calificacion: Number(cal.dataset.rutinaCal) }).eq("id", Number(cal.dataset.id));
+      return cargarRutinas();
+    }
+    const fav = t.closest("[data-rutina-fav]");
+    if (fav) {
+      await db.from("rutinas_youtube").update({ favorito: fav.dataset.fav !== "true" }).eq("id", Number(fav.dataset.rutinaFav));
+      return cargarRutinas();
+    }
+    const usar = t.closest("[data-rutina-usar]");
+    if (usar) return vistaRegistrar(Number(usar.dataset.rutinaUsar));
+  }
+  $("vista").addEventListener("click", accionesEntrenos);
+  $("hoja").addEventListener("click", accionesEntrenos);
+
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
