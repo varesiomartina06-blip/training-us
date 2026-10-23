@@ -1,6 +1,6 @@
 // training.us — service worker (fase 0).
 // Guarda la "cáscara" de la app para que abra rápido. Nunca guarda datos de Supabase.
-const CACHE = "training-us-v9";
+const CACHE = "training-us-v11";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./config.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png",

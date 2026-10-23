@@ -165,7 +165,7 @@
     vistaActual = v;
     if (v === "registrar") v = "entrenar";
     vistaActual = v;
-    const pestana = v === "ausencias" ? "entrenar" : v === "mensajes" ? "inicio" : v;
+    const pestana = v === "ausencias" ? "entrenar" : v === "mensajes" || v === "recompensas" ? "inicio" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
       if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
@@ -175,6 +175,7 @@
     else if (v === "entrenar") vistaEntrenar();
     else if (v === "ausencias") vistaAusencias();
     else if (v === "mensajes") vistaMensajes();
+    else if (v === "recompensas") vistaRecompensas();
     else if (v === "metas") vistaMetas();
     else if (v === "multas") vistaMultas();
     else vistaPerfil(false);
@@ -245,6 +246,7 @@
     $("vista").innerHTML = `
       <h2 class="titulo">Hola, ${esc(perfil.nombre)}</h2>
       <div id="inicio-mensajes"></div>
+      <div id="inicio-recompensas"></div>
       <div id="por-responder-inicio"></div>
       <div id="marcador"><section class="tarjeta"><p class="vacio">Cargando marcador…</p></section></div>
       ${tarjetaParticipante(yo(), true)}
@@ -254,6 +256,7 @@
     cargarPendientesJuntos($("inicio-pendientes"));
     cargarPorResponder($("por-responder-inicio"));
     tarjetaMensajes($("inicio-mensajes"));
+    tarjetaRecompensas($("inicio-recompensas"));
     const [mr, mu] = await Promise.all([db.rpc("marcador"), db.rpc("estado_multas")]);
     const data = mr.data, error = mr.error;
     if (error || !data) { $("marcador").innerHTML = ""; return avisar("No se pudo cargar el marcador: " + errorLegible(error) + ". ¿Ejecutaste fase3.sql?"); }
@@ -468,6 +471,8 @@
         ? "Antes del inicio del desafío puedes ajustar cualquier mes o semana."
         : "Solo se pueden cambiar meses y semanas que todavía no empezaron; lo ya empezado queda fijo."}</p>
 
+      <section class="tarjeta" id="retos"><p class="vacio">Cargando retos…</p></section>
+
       <section class="tarjeta">
         <h3>Metas del mes</h3>
         <p>Se aplican desde la primera semana que pertenece al mes.</p>
@@ -488,6 +493,7 @@
     $("ms-semana").addEventListener("change", () => formSemana($("ms-semana").value));
     formMes(meses[0]);
     formSemana(semanas[0]);
+    seccionRetos($("retos"));
   }
 
   // ---------- Meta mensual
@@ -1927,9 +1933,283 @@
     const destino = (String(url || "").split("#")[1] || "").trim();
     if (!destino || !estado || !perfil?.completado) return;
     if (destino === "mensajes") return vistaMensajes();
-    if (["inicio", "entrenar", "metas", "multas", "perfil", "ausencias"].includes(destino)) irA(destino);
+    if (["inicio", "entrenar", "metas", "multas", "perfil", "ausencias", "recompensas"].includes(destino)) irA(destino);
   }
   navigator.serviceWorker?.addEventListener("message", (e) => { if (e.data?.tipo === "abrir") abrirDesdeUrl(e.data.url); });
+
+  // ================================================================ RETOS Y RECOMPENSAS (fase 7)
+  const TIPO_RETO = { entrenamiento: ["🏋️", "Día extra"], entreno_especifico: ["🧭", "Entreno nuevo"], habito: ["🥗", "Hábito"], marca: ["🏆", "Marca"] };
+  const ESTADO_RETO = { propuesto: "Esperando respuesta", aceptado: "En curso", rechazado: "Rechazado", cumplido: "Cumplido ✓", no_cumplido: "No cumplido", esfuerzo: "🌟 Cumplido por esfuerzo" };
+  const EJEMPLO_RETO = { entrenamiento: "Un entrenamiento extra esta semana", entreno_especifico: "Probar un entrenamiento distinto esta semana", habito: "Cero azúcar añadido toda la semana", marca: "Levantar 60 kg en sentadilla" };
+  const dentroDe48h = (iso) => iso && Date.now() - new Date(iso).getTime() < 48 * 3600 * 1000;
+
+  function tarjetaReto(r, cuerpo = "") {
+    const [e, n] = TIPO_RETO[r.tipo];
+    return `
+      <div class="reto">
+        <span class="etiqueta">${e} ${n}</span><span class="etiqueta ${["no_cumplido", "rechazado"].includes(r.estado) ? "etiqueta-aviso" : ""}">${ESTADO_RETO[r.estado]}</span>
+        <p class="reto-texto">${esc(r.descripcion)}${r.objetivo ? ` <small>· Meta: ${esc(r.objetivo)}</small>` : ""}</p>
+        ${r.tipo === "entreno_especifico" ? `<p class="ayuda">${TIPO[r.entreno_tipo]?.emoji || ""} ${TIPO[r.entreno_tipo]?.nombre || ""}${r.entreno_zona ? " · " + ZONA_NOMBRE[r.entreno_zona] : ""}${r.logrado ? " · ✓ Ya lo hizo esta semana" : ""}</p>` : ""}
+        ${r.nota_declaracion ? `<p class="ayuda">Nota: ${esc(r.nota_declaracion)}</p>` : ""}
+        ${r.disputa_nota ? `<p class="aviso">Disputado: ${esc(r.disputa_nota)}</p>` : ""}
+        ${cuerpo}
+      </div>`;
+  }
+
+  async function seccionRetos(cont) {
+    if (!cont) return;
+    const { data: d, error } = await db.rpc("estado_retos");
+    if (error || !d) { cont.innerHTML = `<p class="ayuda">No se pudieron cargar los retos. ¿Ejecutaste fase7.sql?</p>`; return; }
+    const otro = esc(pareja()?.nombre || "tu pareja");
+    const yoId = usuario.id;
+    const ahoraYo = d.ahora_yo.slice(0, 16);
+    const mios = d.retos.filter((r) => r.retado === yoId);
+    const suyos = d.retos.filter((r) => r.proponente === yoId);
+    const propuestoAMi = mios.find((r) => r.estado === "propuesto");
+    const enCurso = mios.filter((r) => ["aceptado"].includes(r.estado) && r.semana <= d.semana_yo);
+    const miPropuesta = suyos.find((r) => r.semana > d.semana_otro);
+    const suyoActivo = suyos.filter((r) => r.semana <= d.semana_otro && r.semana >= sumarDias(d.semana_otro, -7));
+    const bloques = [];
+
+    if (propuestoAMi) bloques.push(`<span class="grupo-titulo">${otro} te reta (semana del ${fechaCorta(propuestoAMi.semana)})</span>` +
+      tarjetaReto(propuestoAMi, `<p class="ayuda">Si lo aceptas, se suma a tu meta de esa semana. Rechazarlo no cuesta puntos.</p>
+        <div class="acciones-juntos"><button type="button" data-reto-resp="si" data-id="${propuestoAMi.id}">Aceptar</button>
+        <button type="button" class="secundario" style="margin:0" data-reto-resp="no" data-id="${propuestoAMi.id}">Rechazar</button></div>`));
+
+    for (const r of enCurso) {
+      const domingo = sumarDias(r.semana, 6);
+      const puedeDeclarar = ["habito", "marca"].includes(r.tipo) && ahoraYo >= domingo && ahoraYo < sumarDias(r.semana, 7) + "T12:00";
+      bloques.push(`<span class="grupo-titulo">Tu reto de la semana del ${fechaCorta(r.semana)}</span>` + tarjetaReto(r,
+        r.tipo === "entrenamiento" ? `<p class="ayuda">Tu meta de esa semana subió en 1; se evalúa sola al cerrar la semana.</p>` :
+        r.tipo === "entreno_especifico" ? `<p class="ayuda">${r.logrado ? "¡Listo! Ya registraste ese entrenamiento. 🎉" : "Se cumple solo al registrar un entrenamiento válido de ese tipo esta semana."} No sube tu meta y no resta si no lo haces.</p>` :
+        puedeDeclarar ? `<div class="acciones-juntos"><button type="button" data-reto-declarar="si" data-id="${r.id}" data-tipo="${r.tipo}">Lo cumplí</button>
+          <button type="button" class="secundario" style="margin:0" data-reto-declarar="no" data-id="${r.id}" data-tipo="${r.tipo}">No lo cumplí</button></div>
+          <p class="ayuda">Plazo: lunes a las 12:00.</p>` :
+        `<p class="ayuda">Podrás declararlo desde el domingo ${fechaCorta(domingo)} hasta el lunes a las 12:00.</p>`));
+    }
+
+    for (const r of suyoActivo) {
+      let acciones = "";
+      if (["habito", "marca"].includes(r.tipo) && r.estado === "cumplido" && dentroDe48h(r.resuelto_en))
+        acciones = `${r.evidencia_ruta ? `<button type="button" class="enlace" data-ver-foto="${esc(r.evidencia_ruta)}" style="text-align:left;padding-left:0">Ver evidencia</button>` : ""}
+          <button type="button" class="secundario" data-reto-disputar="${r.id}">Disputar</button>`;
+      if (["habito", "marca"].includes(r.tipo) && r.estado === "no_cumplido" && dentroDe48h(r.resuelto_en))
+        acciones = `<button type="button" class="secundario" data-reto-esfuerzo="${r.id}">🌟 Reconocer su esfuerzo</button>
+          <p class="ayuda">Si mejoró aunque no llegó a la meta, puedes darlo por cumplido.</p>`;
+      bloques.push(`<span class="grupo-titulo">Tu reto para ${otro} (semana del ${fechaCorta(r.semana)})</span>` + tarjetaReto(r, acciones));
+    }
+
+    if (miPropuesta) bloques.push(`<span class="grupo-titulo">Tu reto para ${otro} (semana del ${fechaCorta(miPropuesta.semana)})</span>` + tarjetaReto(miPropuesta));
+    else if (d.puede_proponer) bloques.push(`
+      <span class="grupo-titulo">Proponle un reto a ${otro} para la próxima semana</span>
+      <div class="chips" id="rt-tipo" style="margin-bottom:12px">
+        ${Object.entries(TIPO_RETO).map(([k, [e, n]], i) => `<button type="button" data-rt-tipo="${k}" aria-pressed="${i === 0}">${e} ${n}</button>`).join("")}
+      </div>
+      <div id="rt-entreno" hidden>
+        <select id="rt-entreno-tipo" class="campo">${TIPOS.map(([k, e, n]) => `<option value="${k}">${e} ${n}</option>`).join("")}</select>
+        <div id="rt-zonas-c" hidden><span class="grupo-titulo">Zona (opcional)</span>
+          <div class="chips" id="rt-zonas" style="margin-bottom:12px">${ZONAS_CUERPO.map(([k, n]) => `<button type="button" data-rt-zona="${k}" aria-pressed="false">${n}</button>`).join("")}</div></div>
+      </div>
+      <textarea id="rt-desc" maxlength="300" placeholder="${EJEMPLO_RETO.entrenamiento}"></textarea>
+      <input id="rt-obj" maxlength="120" placeholder="Meta concreta (ej.: 60 kg en sentadilla)" hidden style="margin-top:10px">
+      <p class="ayuda">Hasta el domingo a las ${String(d.limite_propuesta).slice(11, 16)} en la hora de ${otro}. No se permiten retos sobre peso corporal ni calorías.</p>
+      <button type="button" class="secundario" id="rt-enviar">Proponer reto</button>`);
+    else bloques.push(`<p class="ayuda">El plazo para proponer el reto de la próxima semana ya terminó.</p>`);
+
+    const historial = d.retos.filter((r) => !["propuesto", "aceptado"].includes(r.estado) && r.semana < sumarDias(d.semana_yo, -7)).slice(0, 6);
+    cont.innerHTML = `
+      <h3>🎯 Retos</h3>
+      <div class="bloques-retos">${bloques.join("")}</div>
+      ${historial.length ? `<details class="historial"><summary>Retos anteriores</summary>${historial.map((r) => `<p class="ayuda">${TIPO_RETO[r.tipo][0]} ${esc(r.descripcion)} · ${r.retado === yoId ? "para ti" : "para " + otro} · ${ESTADO_RETO[r.estado]}</p>`).join("")}</details>` : ""}`;
+
+    let tipoNuevo = "entrenamiento";
+    $("rt-tipo")?.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-rt-tipo]"); if (!b) return;
+      tipoNuevo = b.dataset.rtTipo;
+      $("rt-tipo").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+      $("rt-desc").placeholder = EJEMPLO_RETO[tipoNuevo];
+      $("rt-obj").hidden = tipoNuevo !== "marca";
+      $("rt-entreno").hidden = tipoNuevo !== "entreno_especifico";
+      pintarZonasReto();
+    });
+    let zonaReto = null;
+    const pintarZonasReto = () => {
+      const t = $("rt-entreno-tipo")?.value;
+      if ($("rt-zonas-c")) $("rt-zonas-c").hidden = !CON_ZONAS.includes(t);
+      if (!CON_ZONAS.includes(t)) zonaReto = null;
+      $("rt-zonas")?.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.rtZona === zonaReto));
+    };
+    $("rt-entreno-tipo")?.addEventListener("change", pintarZonasReto);
+    $("rt-zonas")?.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-rt-zona]"); if (!b) return;
+      zonaReto = zonaReto === b.dataset.rtZona ? null : b.dataset.rtZona;
+      pintarZonasReto();
+    });
+    $("rt-enviar")?.addEventListener("click", async (e) => {
+      const tEnt = $("rt-entreno-tipo")?.value;
+      const autoEntreno = tipoNuevo === "entreno_especifico"
+        ? `Entrenar ${zonaReto ? ZONA_NOMBRE[zonaReto].toLowerCase() + " (" + TIPO[tEnt].nombre.toLowerCase() + ")" : TIPO[tEnt].nombre.toLowerCase()} al menos un día`
+        : "";
+      const desc = $("rt-desc").value.trim() || (tipoNuevo === "entrenamiento" ? EJEMPLO_RETO.entrenamiento : autoEntreno);
+      if (!desc) return avisar("Describe el reto.");
+      e.target.disabled = true;
+      const r = await db.rpc("proponer_reto", {
+        p_tipo: tipoNuevo, p_descripcion: desc, p_objetivo: $("rt-obj").value || null,
+        p_entreno_tipo: tipoNuevo === "entreno_especifico" ? tEnt : null,
+        p_entreno_zona: tipoNuevo === "entreno_especifico" ? zonaReto : null
+      });
+      e.target.disabled = false;
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("Reto enviado. 🎯", "ok"); seccionRetos(cont);
+    });
+  }
+
+  function hojaDeclarar(id, tipo, cumplido) {
+    let foto = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">${cumplido ? "¡Lo cumpliste!" : "No lo cumpliste"}</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">${cumplido ? "Tu pareja tendrá 48 horas para revisarlo." : "Tu pareja podrá reconocer tu esfuerzo si mejoraste."}</p>
+      ${tipo === "marca" && cumplido ? `<div class="campo" id="dc-foto"><span class="grupo-titulo">Evidencia (obligatoria)</span>
+        <label class="agregar-foto" style="aspect-ratio:auto;padding:22px"><input type="file" accept="image/*" id="dc-archivo">📷 Foto de la marca</label></div>` : ""}
+      <div class="campo"><label for="dc-nota">Nota (opcional)</label><textarea id="dc-nota" maxlength="500" placeholder="Cómo te fue, qué aprendiste…"></textarea></div>
+      <button type="button" class="boton-principal" id="dc-enviar">Confirmar</button>`);
+    $("dc-archivo")?.addEventListener("change", (e) => {
+      foto = e.target.files[0] || null;
+      if (foto) $("dc-foto").innerHTML = `<div class="galeria"><img src="${URL.createObjectURL(foto)}" alt="Evidencia"></div>`;
+    });
+    $("dc-enviar").addEventListener("click", async (e) => {
+      if (tipo === "marca" && cumplido && !foto) return avisar("Adjunta la foto de evidencia.");
+      e.target.disabled = true;
+      try {
+        let ruta = null;
+        if (foto) {
+          ruta = `${usuario.id}/retos/${Date.now()}.jpg`;
+          const up = await db.storage.from("evidencias").upload(ruta, await comprimir(foto, 1280, 0.75), { contentType: "image/jpeg" });
+          if (up.error) throw up.error;
+        }
+        const r = await db.rpc("declarar_reto", { p_id: id, p_cumplido: cumplido, p_nota: $("dc-nota").value, p_evidencia: ruta });
+        if (r.error) throw r.error;
+        cerrarHoja(); avisar("Reto declarado.", "ok"); seccionRetos($("retos"));
+      } catch (err) { e.target.disabled = false; avisar(errorLegible(err)); }
+    });
+  }
+
+  async function accionesRetos(e) {
+    const t = e.target;
+    const resp = t.closest("[data-reto-resp]");
+    if (resp) {
+      resp.disabled = true;
+      const r = await db.rpc("responder_reto", { p_id: Number(resp.dataset.id), p_acepta: resp.dataset.retoResp === "si" });
+      if (r.error) { resp.disabled = false; return avisar(errorLegible(r.error)); }
+      avisar(r.data === "aceptado" ? "¡Reto aceptado! 💪" : "Reto rechazado.", "ok");
+      return irA(vistaActual);
+    }
+    const dec = t.closest("[data-reto-declarar]");
+    if (dec) return hojaDeclarar(Number(dec.dataset.id), dec.dataset.tipo, dec.dataset.retoDeclarar === "si");
+    const dis = t.closest("[data-reto-disputar]");
+    if (dis) {
+      const nota = prompt("¿Por qué disputas este reto? Tu pareja verá la nota.");
+      if (nota === null) return;
+      const r = await db.rpc("disputar_reto", { p_id: Number(dis.dataset.retoDisputar), p_nota: nota });
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("Reto disputado.", "ok"); return seccionRetos($("retos"));
+    }
+    const esf = t.closest("[data-reto-esfuerzo]");
+    if (esf) {
+      if (!confirm("¿Dar este reto por cumplido por su esfuerzo? Recibirá los mismos puntos que si lo hubiera cumplido.")) return;
+      const r = await db.rpc("reconocer_esfuerzo", { p_id: Number(esf.dataset.retoEsfuerzo) });
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("¡Esfuerzo reconocido! 🌟", "ok"); return seccionRetos($("retos"));
+    }
+    const rec = t.closest("[data-disfrutar]");
+    if (rec) {
+      const nota = prompt("¿Cómo la disfrutaste? (opcional)");
+      if (nota === null) return;
+      const r = await db.rpc("disfrutar_recompensa", { p_id: Number(rec.dataset.disfrutar), p_nota: nota });
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("¡A disfrutarla! 🎁", "ok"); return vistaRecompensas();
+    }
+    const ed = t.closest("[data-editar-regla]");
+    if (ed) return hojaRegla(Number(ed.dataset.editarRegla), ed.dataset.nombre, ed.dataset.desc);
+    if (t.closest("[data-ir-recompensas]")) return vistaRecompensas();
+  }
+  $("vista").addEventListener("click", accionesRetos);
+  $("hoja").addEventListener("click", accionesRetos);
+
+  // ---------- Recompensas
+  async function tarjetaRecompensas(cont) {
+    if (!cont) return;
+    const { data: d } = await db.rpc("estado_retos");
+    if (!d) { cont.innerHTML = ""; return; }
+    const disponibles = d.recompensas.filter((r) => r.user_id === usuario.id && r.estado === "disponible").length;
+    const propuestoAMi = d.retos.find((r) => r.retado === usuario.id && r.estado === "propuesto");
+    cont.innerHTML = `
+      ${propuestoAMi ? `<section class="tarjeta pendiente"><h3>🎯 ${esc(pareja()?.nombre || "Tu pareja")} te propuso un reto</h3>
+        <p>${TIPO_RETO[propuestoAMi.tipo][0]} ${esc(propuestoAMi.descripcion)}</p>
+        <div class="acciones-juntos"><button type="button" data-reto-resp="si" data-id="${propuestoAMi.id}">Aceptar</button>
+        <button type="button" class="secundario" style="margin:0" data-reto-resp="no" data-id="${propuestoAMi.id}">Rechazar</button></div></section>` : ""}
+      <button type="button" class="item" data-ir-recompensas style="margin-bottom:14px">
+        <span class="mini">🎁</span>
+        <span><strong>Recompensas${disponibles ? ` <span class="burbuja-num">${disponibles}</span>` : ""}</strong>
+          <span class="meta">${d.rachas.yo.mensual} mes(es) perfecto(s) seguidos · ${disponibles ? "tienes recompensas por disfrutar" : "cumple tu mes para desbloquear"}</span></span>
+        <span class="lado">›</span>
+      </button>`;
+  }
+
+  async function vistaRecompensas() {
+    vistaActual = "recompensas";
+    document.querySelectorAll("#pestanas button").forEach((b) => {
+      if (b.dataset.vista === "inicio") b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    });
+    $("vista").innerHTML = `<div class="cabecera-vista"><h2 class="titulo">Recompensas</h2><button type="button" data-accion="volver-inicio">Volver</button></div><p class="sub">Cargando…</p>`;
+    const { data: d, error } = await db.rpc("estado_retos");
+    if (error || !d) return avisar("No se pudieron cargar las recompensas.");
+    const racha = d.rachas.yo.mensual;
+    const siguiente = d.reglas.map((r) => r.meses).filter((m) => m > 1).find((m) => racha < m) || null;
+    const mias = d.recompensas.filter((r) => r.user_id === usuario.id);
+    const suyas = d.recompensas.filter((r) => r.user_id !== usuario.id);
+    const fila = (r, mia) => `
+      <div class="tarjeta" style="margin:0">
+        <h3>🎁 ${esc(r.nombre)}</h3>
+        <span class="etiqueta">${r.estado === "disponible" ? "Disponible" : "Disfrutada"}</span><span class="etiqueta">${fmt(r.mes, { month: "long", year: "numeric" })}</span>
+        <p>${esc(r.descripcion || "")}</p>
+        ${r.comida_libre && r.estado === "disponible" ? `<p class="ayuda">La comida libre extra se podrá usar en el registro de comidas (fase 8).</p>` : ""}
+        ${r.nota ? `<p class="ayuda">${esc(r.nota)}</p>` : ""}
+        ${mia && r.estado === "disponible" ? `<button type="button" class="secundario" data-disfrutar="${r.id}">Marcar como disfrutada</button>` : ""}
+      </div>`;
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">Recompensas</h2><button type="button" data-accion="volver-inicio">Volver</button></div>
+      <p class="sub">Se desbloquean con meses perfectos seguidos: todos tus entrenamientos obligatorios cumplidos.</p>
+      <section class="tarjeta">
+        <h3>🏅 ${racha} mes${racha === 1 ? "" : "es"} perfecto${racha === 1 ? "" : "s"} seguido${racha === 1 ? "" : "s"}</h3>
+        <p>${siguiente ? `Te faltan ${siguiente - racha} para la recompensa de ${siguiente} meses.` : "¡Sigue así!"}</p>
+      </section>
+      <h3 style="margin:22px 0 10px">Tus recompensas</h3>
+      <div class="lista">${mias.length ? mias.map((r) => fila(r, true)).join("") : `<p class="vacio">Aún no hay recompensas. ¡El primer mes perfecto desbloquea la primera!</p>`}</div>
+      ${suyas.length ? `<h3 style="margin:22px 0 10px">Las de ${esc(pareja()?.nombre || "tu pareja")}</h3><div class="lista">${suyas.map((r) => fila(r, false)).join("")}</div>` : ""}
+      <h3 style="margin:22px 0 10px">Qué se puede ganar</h3>
+      <div class="lista">${d.reglas.map((r) => `
+        <div class="tarjeta" style="margin:0">
+          <h3>${r.meses} mes${r.meses === 1 ? "" : "es"} seguido${r.meses === 1 ? "" : "s"}: ${esc(r.nombre)}</h3>
+          <p>${esc(r.descripcion || "")}</p>
+          <button type="button" class="enlace" style="text-align:left;padding-left:0" data-editar-regla="${r.id}" data-nombre="${esc(r.nombre)}" data-desc="${esc(r.descripcion || "")}">Editar</button>
+        </div>`).join("")}</div>
+      <p class="ayuda" style="margin-top:12px">Cada recompensa se repite: la de 3 meses vuelve a los 6, 9, 12…</p>`;
+  }
+
+  function hojaRegla(id, nombre, desc) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.6rem">Editar recompensa</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Acuérdenlo entre los dos: el cambio lo ven ambos.</p>
+      <div class="campo"><label for="rg-nombre">Nombre</label><input id="rg-nombre" maxlength="80" value="${nombre}"></div>
+      <div class="campo"><label for="rg-desc">Descripción</label><textarea id="rg-desc" maxlength="300">${desc}</textarea></div>
+      <button type="button" class="boton-principal" id="rg-guardar-regla">Guardar</button>`);
+    $("rg-guardar-regla").addEventListener("click", async () => {
+      const r = await db.from("reglas_recompensa").update({ nombre: $("rg-nombre").value.trim(), descripcion: $("rg-desc").value.trim() || null }).eq("id", id);
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Recompensa actualizada.", "ok"); vistaRecompensas();
+    });
+  }
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>

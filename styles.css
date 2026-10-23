@@ -355,3 +355,14 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .escribir { display: grid; grid-template-columns: minmax(0,1fr) 52px; gap: 8px; align-items: end; position: sticky; bottom: calc(env(safe-area-inset-bottom) + var(--alto-pestanas) + 12px); background: var(--fondo); padding-top: 6px; }
 .escribir textarea { min-height: 52px; height: 52px; resize: none; padding: 14px 16px; }
 .escribir button { width: 52px; padding: 0; font-size: 1.2rem; background: var(--acento); }
+
+/* ===================== Fase 7: retos y recompensas ===================== */
+.bloques-retos { display: grid; gap: 10px; margin-top: 12px; }
+.bloques-retos .grupo-titulo { margin: 8px 0 0; }
+.reto { background: var(--fondo); border-radius: 14px; padding: 12px; }
+.reto-texto { margin: 8px 0 0 !important; color: var(--texto) !important; font-weight: 600; }
+.reto .acciones-juntos { margin-top: 12px; }
+.reto button.secundario { margin-top: 10px; }
+.historial { margin-top: 14px; }
+.historial summary { font-weight: 600; color: var(--texto-suave); cursor: pointer; }
+.reto .etiqueta { background: var(--superficie); }
