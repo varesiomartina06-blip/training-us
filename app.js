@@ -125,6 +125,7 @@
     else if (rz.data === "cambio_programado") avisar(`Detectamos la zona ${zona}. Se aplicará desde mañana.`, "ok");
     await recargar();
     limpiarComprobantes().catch(() => {});
+    limpiarFotosComida().catch(() => {});
   }
 
   async function recargar() {
@@ -164,8 +165,9 @@
   function irA(v) {
     vistaActual = v;
     if (v === "registrar") v = "entrenar";
+    if (v === "comida-form") v = "comida";
     vistaActual = v;
-    const pestana = v === "ausencias" ? "entrenar" : v === "mensajes" || v === "recompensas" ? "inicio" : v;
+    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil"].includes(v) ? "mas" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
       if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
@@ -178,6 +180,8 @@
     else if (v === "recompensas") vistaRecompensas();
     else if (v === "metas") vistaMetas();
     else if (v === "multas") vistaMultas();
+    else if (v === "comida") vistaComida();
+    else if (v === "mas") vistaMas();
     else vistaPerfil(false);
   }
 
@@ -413,6 +417,8 @@
           <label class="op-rosa"><input type="radio" name="pf-tema" value="rosa" ${temaDefecto === "rosa" ? "checked" : ""}><span>Rosa</span></label>
           <label class="op-azul"><input type="radio" name="pf-tema" value="azul" ${temaDefecto === "azul" ? "checked" : ""}><span>Azul</span></label>
         </div>
+        ${esPrimeraVez ? "" : `<label class="interruptor campo"><span>Compartir mis macros con mi pareja</span><input id="pf-macros" type="checkbox" ${perfil.compartir_macros ? "checked" : ""}></label>
+        <p class="ayuda" style="margin:-10px 0 16px">Proteína, carbohidratos, azúcares, grasas y fibra. Las calorías nunca se comparten.</p>`}
         <button type="submit" class="boton-principal">${esPrimeraVez ? "Guardar y continuar" : "Guardar cambios"}</button>
         ${esPrimeraVez ? "" : `<button type="button" id="btn-salir" class="secundario">Cerrar sesión</button>`}
       </form>`;
@@ -433,6 +439,7 @@
         tema: document.querySelector('input[name="pf-tema"]:checked')?.value || null,
         completado: true
       };
+      if ($("pf-macros")) datos.compartir_macros = $("pf-macros").checked;
       const peso = esPrimeraVez ? Number($("pf-peso").value) : null;
       if (!datos.nombre || !datos.fecha_nacimiento || !datos.sexo || !datos.estatura_cm || !datos.tema)
         return avisar("Completa nombre, fecha de nacimiento, sexo, estatura y color.");
@@ -524,6 +531,16 @@
         <div><label for="mm-alcohol">Bebidas por semana</label><input id="mm-alcohol" type="number" inputmode="numeric" min="0" max="50" placeholder="Sin límite" value="${base?.alcohol_bebidas_semana ?? ""}"></div>
       </div>
       <p class="ayuda">Deja las bebidas vacías si no quieres límite.</p>
+      <span class="grupo-titulo" style="margin-top:18px">Regla de cantidad de comidas por día</span>
+      <div class="fila">
+        <select id="mm-regla-tipo" aria-label="Tipo de regla">
+          <option value="" ${!base?.comidas_max && !base?.comidas_min ? "selected" : ""}>Sin regla</option>
+          <option value="max" ${base?.comidas_max ? "selected" : ""}>Máximo</option>
+          <option value="min" ${base?.comidas_min ? "selected" : ""}>Mínimo</option>
+        </select>
+        <input id="mm-regla-n" type="number" inputmode="numeric" min="1" max="12" value="${base?.comidas_max || base?.comidas_min || 3}" aria-label="Número de comidas">
+      </div>
+      <p class="ayuda">Ejemplo: máximo 3 (más de 3 resta en hábitos) o mínimo 3 (menos de 3 resta).</p>
       <hr class="separador">
       <span class="grupo-titulo">Objetivos diarios de nutrición</span>
       <p class="privado">🔒 Privados: solo tú los ves.</p>
@@ -578,7 +595,9 @@
         p_mes: mes, p_entrenos: entrenos,
         p_libres: Number($("mm-libres").value || 0),
         p_alcohol: alcohol === "" ? null : Number(alcohol),
-        p_nutricion: nutricion
+        p_nutricion: nutricion,
+        p_comidas_max: $("mm-regla-tipo").value === "max" ? Number($("mm-regla-n").value) : null,
+        p_comidas_min: $("mm-regla-tipo").value === "min" ? Number($("mm-regla-n").value) : null
       });
       e.target.disabled = false;
       if (r.error) return avisar(errorLegible(r.error));
@@ -1933,7 +1952,7 @@
     const destino = (String(url || "").split("#")[1] || "").trim();
     if (!destino || !estado || !perfil?.completado) return;
     if (destino === "mensajes") return vistaMensajes();
-    if (["inicio", "entrenar", "metas", "multas", "perfil", "ausencias", "recompensas"].includes(destino)) irA(destino);
+    if (["inicio", "entrenar", "comida", "metas", "multas", "perfil", "ausencias", "recompensas", "mas"].includes(destino)) irA(destino);
   }
   navigator.serviceWorker?.addEventListener("message", (e) => { if (e.data?.tipo === "abrir") abrirDesdeUrl(e.data.url); });
 
@@ -2159,7 +2178,7 @@
   async function vistaRecompensas() {
     vistaActual = "recompensas";
     document.querySelectorAll("#pestanas button").forEach((b) => {
-      if (b.dataset.vista === "inicio") b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+      if (b.dataset.vista === "mas") b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
     $("vista").innerHTML = `<div class="cabecera-vista"><h2 class="titulo">Recompensas</h2><button type="button" data-accion="volver-inicio">Volver</button></div><p class="sub">Cargando…</p>`;
     const { data: d, error } = await db.rpc("estado_retos");
@@ -2210,6 +2229,484 @@
       cerrarHoja(); avisar("Recompensa actualizada.", "ok"); vistaRecompensas();
     });
   }
+
+  // ================================================================ COMIDA (fase 8)
+  const CATEGORIAS = [["desayuno", "🥐", "Desayuno"], ["almuerzo", "🍽️", "Almuerzo"], ["snack", "🍎", "Snack"],
+    ["cena", "🌙", "Cena"], ["postre", "🍰", "Postre"], ["otra", "🥄", "Otra"]];
+  const CAT = Object.fromEntries(CATEGORIAS.map(([k, e, n]) => [k, { emoji: e, nombre: n }]));
+  const CONTEXTOS = [["casa", "🏠 En casa"], ["restaurante", "🍴 Restaurante"], ["delivery", "🛵 Delivery"], ["rapida", "🍔 Comida rápida"], ["otro", "✨ Otro"]];
+  const CONTEXTO = Object.fromEntries(CONTEXTOS);
+  const SENTIMIENTOS = [["hambre", "😋 Con hambre"], ["satisfecho", "😊 Satisfecho"], ["lleno", "😮‍💨 Lleno"], ["orgulloso", "🌟 Orgulloso"], ["culpable", "😔 Culpable"]];
+  const SENTIMIENTO = Object.fromEntries(SENTIMIENTOS);
+  const NUTRIS = [["proteina", "Proteína"], ["carbohidratos", "Carbohidratos"], ["azucares", "Azúcares"], ["grasas", "Grasas"], ["fibra", "Fibra"]];
+  const r1 = (n) => Math.round(Number(n || 0) * 10) / 10;
+  let comidaFecha = null, comidaDe = "yo";
+
+  async function urlsComidas(rutas) {
+    if (!rutas.length) return {};
+    const { data } = await db.storage.from("comidas").createSignedUrls(rutas, 3600);
+    return Object.fromEntries((data || []).filter((x) => x.signedUrl).map((x) => [x.path, x.signedUrl]));
+  }
+  const fotoVigente = (c) => c.foto_ruta && !c.foto_borrada && c.foto_hasta && new Date(c.foto_hasta) > new Date();
+
+  function barraNutriente(nombre, valor, obj, unidad) {
+    let txt = `${r1(valor)} ${unidad}`, pctB = 0, ok = null;
+    if (obj) {
+      const min = obj.valor_min != null ? Number(obj.valor_min) : null, max = obj.valor_max != null ? Number(obj.valor_max) : null;
+      if (obj.tipo === "maximo") { pctB = Math.min(100, (valor / max) * 100); ok = valor <= max; txt += ` / máx. ${r1(max)}`; }
+      if (obj.tipo === "minimo") { pctB = Math.min(100, (valor / min) * 100); ok = valor >= min; txt += ` / mín. ${r1(min)}`; }
+      if (obj.tipo === "rango") { pctB = Math.min(100, (valor / max) * 100); ok = valor >= min && valor <= max; txt += ` / ${r1(min)}–${r1(max)}`; }
+    }
+    return `
+      <div class="nutri-fila">
+        <div class="nutri-cab"><span>${nombre}</span><strong>${txt}${ok === null ? "" : ok ? " ✓" : ""}</strong></div>
+        ${obj ? `<div class="progreso"><span style="width:${pctB}%;${ok === false && obj.tipo !== "minimo" ? "background:var(--error)" : ""}"></span></div>` : ""}
+      </div>`;
+  }
+
+  function itemComida(c, urls, kcal) {
+    const cat = CAT[c.categoria];
+    if (c.saltada) return `
+      <button type="button" class="item" data-comida="${c.id}" style="min-height:56px">
+        <span class="mini">⏭️</span><span><strong>${cat.nombre} saltado</strong><span class="meta">${c.hora ? c.hora.slice(0, 5) : ""}</span></span><span></span>
+      </button>`;
+    const foto = fotoVigente(c) ? urls[c.foto_ruta] : null;
+    return `
+      <button type="button" class="item" data-comida="${c.id}">
+        <span class="mini" ${foto ? `style="background-image:url('${foto}')"` : ""}>${foto ? "" : cat.emoji}</span>
+        <span><strong>${cat.emoji} ${esc(c.nombre)}</strong>
+          <span class="meta">${cat.nombre}${c.hora ? " · " + c.hora.slice(0, 5) : ""}${kcal != null ? ` · 🔒 ${Math.round(kcal)} kcal` : ""}</span>
+          ${c.es_libre ? `<span class="etiqueta etiqueta-aviso">🍕 Comida libre · no saludable</span>` : c.saludable ? `<span class="etiqueta etiqueta-ok">🥗 Saludable</span>` : `<span class="etiqueta">No saludable</span>`}
+          ${c.contexto ? `<span class="etiqueta">${CONTEXTO[c.contexto]}</span>` : ""}
+          ${c.juntos === "confirmado" ? `<span class="etiqueta">💞 Juntos</span>` : c.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : ""}
+          ${!foto ? `<span class="etiqueta">Foto expirada</span>` : ""}
+        </span>
+        <span class="lado">${c.sentimiento ? SENTIMIENTO[c.sentimiento].split(" ")[0] : ""}</span>
+      </button>`;
+  }
+
+  async function vistaComida() {
+    vistaActual = "comida";
+    const y = yo(), p = pareja();
+    if (!comidaFecha) comidaFecha = y.hoy;
+    const quien = comidaDe === "yo" ? y : p;
+    const esHoy = comidaFecha === y.hoy;
+    $("vista").innerHTML = `
+      <h2 class="titulo">Comida</h2>
+      <div class="nav-dia">
+        <button type="button" data-dia-comida="-1" aria-label="Día anterior">‹</button>
+        <strong>${etiquetaFecha(comidaFecha)}${esHoy || comidaFecha === sumarDias(y.hoy, -1) ? "" : ""}</strong>
+        <button type="button" data-dia-comida="1" aria-label="Día siguiente" ${esHoy ? "disabled" : ""}>›</button>
+      </div>
+      <div class="segmentado" role="group" aria-label="Ver comidas de">
+        <button type="button" data-comida-de="yo" aria-pressed="${comidaDe === "yo"}">Mi día</button>
+        <button type="button" data-comida-de="pareja" aria-pressed="${comidaDe === "pareja"}">${esc(p?.nombre || "Pareja")}</button>
+      </div>
+      <div id="comida-contenido"><p class="vacio">Cargando…</p></div>`;
+    if (!quien) return;
+    const { data: d, error } = await db.rpc("resumen_dia_comida", { p_user: quien.id, p_fecha: comidaFecha });
+    if (error || !d) { $("comida-contenido").innerHTML = ""; return avisar("No se pudo cargar el día: " + errorLegible(error) + ". ¿Ejecutaste fase8.sql?"); }
+    if (vistaActual !== "comida") return;
+    const urls = await urlsComidas(d.comidas.filter(fotoVigente).map((c) => c.foto_ruta));
+    const esMio = comidaDe === "yo";
+    const editable = esMio && (comidaFecha >= sumarDias(y.hoy, -1) || antesDelInicio());
+    const regla = d.comidas_max ? `${d.n_comidas} comida${d.n_comidas === 1 ? "" : "s"} · máximo ${d.comidas_max}${d.n_comidas > d.comidas_max ? " ⚠️" : " ✓"}`
+      : d.comidas_min ? `${d.n_comidas} comida${d.n_comidas === 1 ? "" : "s"} · mínimo ${d.comidas_min}${d.n_comidas >= d.comidas_min ? " ✓" : d.cerrado ? " ⚠️" : ""}`
+      : `${d.n_comidas} comida${d.n_comidas === 1 ? "" : "s"}`;
+    const mes = d.mes || {};
+    const lib = d.libres;
+    const objetivos = Object.fromEntries((d.objetivos || []).map((o) => [o.nutriente, o]));
+    $("comida-contenido").innerHTML = `
+      <section class="tarjeta">
+        <span class="puntos-etiqueta">Alimentación saludable ${esHoy ? "hoy" : "del día"}</span>
+        <div class="cifra">${d.pct == null ? "—" : Math.round(d.pct) + " %"}</div>
+        ${d.dia_libre ? `<p>🎉 Día libre: lo saludable suma y lo demás no resta.</p>` : ""}
+        <p>${regla}${d.cerrado ? " · día cerrado" : ""}</p>
+        <p>Este mes: <strong>${mes.pct == null ? "—" : Math.round(mes.pct) + " %"}</strong>${mes.dias ? ` · ${mes.con_registro} día${mes.con_registro === 1 ? "" : "s"} con registro` : ""}</p>
+        ${esMio && lib ? `<p>🍕 Comidas libres: quedan <strong>${lib.quedan}</strong> de ${lib.total} este mes${lib.recompensa ? " · 🎁 +1 de recompensa" : ""}${lib.regalo_juntos ? " · 💞 hoy tienen una de regalo" : ""}</p>` : ""}
+      </section>
+      ${d.macros || d.kcal != null ? `
+      <section class="tarjeta">
+        <h3>${esMio ? "🔒 Nutrición del día" : "Macros que comparte"}</h3>
+        ${esMio ? barraNutriente("Calorías", d.kcal, objetivos.calorias, "kcal") : ""}
+        ${NUTRIS.map(([k, n]) => barraNutriente(n, d.macros?.[k] || 0, esMio ? objetivos[k] : null, "g")).join("")}
+        ${esMio ? `<p class="ayuda">Solo tú ves las calorías${perfil.compartir_macros ? "; tus macros los ve también tu pareja" : " y los macros"}. Puedes cambiarlo en Perfil.</p>` : ""}
+      </section>` : ""}
+      <div id="comidas-pendientes"></div>
+      ${editable ? `
+        <button type="button" class="boton-principal" data-accion-comida="nueva">Registrar comida</button>
+        <div class="acciones-juntos" style="margin:10px 0 18px">
+          <button type="button" class="secundario" style="margin:0" data-accion-comida="saltada">⏭️ Comida saltada</button>
+          ${!d.cerrado ? `<button type="button" class="secundario" style="margin:0" data-accion-comida="cerrar">✅ Cerrar mi día</button>` : `<button type="button" class="secundario" style="margin:0" disabled>Día cerrado ✓</button>`}
+        </div>` : ""}
+      <div class="lista">${d.comidas.length ? d.comidas.map((c) => itemComida(c, urls, esMio ? d.kcal_por_comida?.[c.id] : null)).join("")
+        : `<p class="vacio">${esMio ? "Aún no registraste comidas este día." : "Sin comidas registradas este día."}</p>`}</div>`;
+    if (esMio) cargarComidasPendientes();
+  }
+
+  async function cargarComidasPendientes() {
+    const p = pareja(); const cont = $("comidas-pendientes");
+    if (!p || !cont) return;
+    const { data } = await db.from("comidas").select("id, nombre, fecha, categoria").eq("user_id", p.id).eq("juntos", "pendiente")
+      .eq("estado", "completa").gte("fecha", sumarDias(yo().hoy, -2));
+    cont.innerHTML = (data || []).map((c) => `
+      <section class="tarjeta pendiente"><h3>💞 ¿Comieron juntos?</h3>
+        <p>${esc(p.nombre)} registró ${CAT[c.categoria].emoji} ${esc(c.nombre)} (${etiquetaFecha(c.fecha).toLowerCase()}) como comida juntos.</p>
+        <div class="acciones-juntos"><button type="button" data-comida-juntos="si" data-id="${c.id}">Confirmar</button>
+          <button type="button" class="secundario" style="margin:0" data-comida-juntos="no" data-id="${c.id}">No fue juntos</button></div>
+      </section>`).join("");
+  }
+
+  // ---------- Detalle de una comida
+  async function verComida(id) {
+    const { data: c, error } = await db.from("comidas").select("*").eq("id", id).single();
+    if (error) return avisar(errorLegible(error));
+    const esMio = c.user_id === usuario.id;
+    const items = esMio ? (await db.from("comida_items").select("*").eq("comida_id", id)).data || [] : [];
+    const url = fotoVigente(c) ? (await urlsComidas([c.foto_ruta]))[c.foto_ruta] : null;
+    const editable = esMio && (c.fecha >= sumarDias(yo().hoy, -1) || antesDelInicio());
+    const tot = (k) => items.reduce((a, i) => a + Number(i[k] || 0), 0);
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">${CAT[c.categoria].emoji} ${c.saltada ? CAT[c.categoria].nombre + " saltado" : esc(c.nombre)}</h2>
+        <button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub" style="margin-bottom:8px">${etiquetaFecha(c.fecha)}${c.hora ? " · " + c.hora.slice(0, 5) : ""}</p>
+      ${!c.saltada ? `
+        ${c.es_libre ? `<span class="etiqueta etiqueta-aviso">🍕 Comida libre${c.libre_origen === "juntos" ? " de regalo" : c.libre_origen === "recompensa" ? " de recompensa" : ""} · no saludable</span>` : c.saludable ? `<span class="etiqueta etiqueta-ok">🥗 Saludable</span>` : `<span class="etiqueta">No saludable</span>`}
+        ${c.contexto ? `<span class="etiqueta">${CONTEXTO[c.contexto]}</span>` : ""}
+        ${c.sentimiento ? `<span class="etiqueta">${SENTIMIENTO[c.sentimiento]}</span>` : ""}
+        <div class="galeria">${url ? `<img src="${url}" alt="Foto de la comida">` : `<p class="vacio">La foto ya no está disponible (se borra a las 24 horas).</p>`}</div>` : ""}
+      ${esMio && items.length ? `<section class="tarjeta"><h3>🔒 Alimentos</h3>
+        ${items.map((i) => `<div class="fila-stat" style="grid-template-columns:minmax(0,1fr) auto"><span>${esc(i.nombre)} <small>×${r1(i.cantidad)}${i.unidad ? " " + esc(i.unidad) : ""}</small></span><strong>${Math.round(i.kcal)} kcal</strong></div>`).join("")}
+        <p class="ayuda">Total: ${Math.round(tot("kcal"))} kcal · P ${r1(tot("proteina"))} g · C ${r1(tot("carbohidratos"))} g · Az ${r1(tot("azucares"))} g · G ${r1(tot("grasas"))} g · F ${r1(tot("fibra"))} g</p></section>` : ""}
+      ${c.notas ? `<section class="tarjeta"><h3>Notas</h3><p>${esc(c.notas)}</p></section>` : ""}
+      ${!esMio && c.juntos === "pendiente" ? `<div class="acciones-juntos"><button type="button" data-comida-juntos="si" data-id="${c.id}">Comimos juntos</button>
+        <button type="button" class="secundario" style="margin:0" data-comida-juntos="no" data-id="${c.id}">No fue juntos</button></div>` : ""}
+      ${editable ? `<div class="acciones-juntos" style="margin-top:16px">
+        ${!c.saltada ? `<button type="button" class="secundario" style="margin:0" data-editar-comida="${c.id}">Editar</button>` : ""}
+        <button type="button" class="secundario" style="margin:0;color:var(--error)" data-borrar-comida="${c.id}">Eliminar</button></div>` : ""}`);
+  }
+
+  // ---------- Formulario de comida (nueva o edición)
+  async function vistaFormComida(editId) {
+    vistaActual = "comida-form";
+    const y = yo();
+    const fecha = comidaFecha || y.hoy;
+    let base = null, itemsBase = [];
+    if (editId) {
+      base = (await db.from("comidas").select("*").eq("id", editId).single()).data;
+      itemsBase = (await db.from("comida_items").select("*").eq("comida_id", editId)).data || [];
+    }
+    const [res, anteriores] = await Promise.all([
+      db.rpc("resumen_dia_comida", { p_user: usuario.id, p_fecha: fecha }),
+      db.from("comidas").select("id, nombre, categoria, contexto, saludable").eq("user_id", usuario.id).eq("estado", "completa")
+        .eq("saltada", false).order("creado_en", { ascending: false }).limit(40)
+    ]);
+    const lib = res.data?.libres || {};
+    const ahora = new Date();
+    const f = {
+      categoria: base?.categoria || null, saludable: base ? base.saludable : true, contexto: base?.contexto || null,
+      sentimiento: base?.sentimiento || null, libre: base?.es_libre || false, juntos: base ? base.juntos !== "no" : false,
+      foto: null, items: itemsBase.map((i) => ({ ...i }))
+    };
+    const libreDisponible = f.libre || (!lib.usada_hoy && (lib.quedan > 0 || lib.recompensa || lib.regalo_juntos));
+    const vistos = new Set();
+    const previas = (anteriores.data || []).filter((c) => !vistos.has(c.nombre) && vistos.add(c.nombre)).slice(0, 20);
+
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">${editId ? "Editar comida" : "Registrar comida"}</h2><button type="button" data-accion-comida="volver">Cancelar</button></div>
+      <p class="sub">${etiquetaFecha(fecha)}${editId ? "" : " · La foto es obligatoria y se borra a las 24 horas."}</p>
+      ${!editId && previas.length ? `<section class="tarjeta"><label for="cf-copiar">Repetir una comida anterior (opcional)</label>
+        <select id="cf-copiar"><option value="">Elegir…</option>${previas.map((c) => `<option value="${c.id}">${CAT[c.categoria].emoji} ${esc(c.nombre)}</option>`).join("")}</select></section>` : ""}
+      <section class="tarjeta">
+        <span class="grupo-titulo">Comida</span>
+        <div class="chips" id="cf-cat">${CATEGORIAS.map(([k, e, n]) => `<button type="button" data-cf-cat="${k}" aria-pressed="${f.categoria === k}">${e} ${n}</button>`).join("")}</div>
+        <div class="fila campo" style="margin-top:14px">
+          <div><label for="cf-nombre">Nombre</label><input id="cf-nombre" maxlength="120" value="${esc(base?.nombre || "")}" placeholder="Ej.: Pollo con arroz"></div>
+          <div><label for="cf-hora">Hora</label><input id="cf-hora" type="time" value="${base?.hora ? base.hora.slice(0, 5) : String(ahora.getHours()).padStart(2, "0") + ":" + String(ahora.getMinutes()).padStart(2, "0")}"></div>
+        </div>
+        <span class="grupo-titulo">Foto ${editId ? "(opcional: reemplazar)" : "(obligatoria)"}</span>
+        <div id="cf-foto"><label class="agregar-foto" style="aspect-ratio:auto;padding:22px"><input type="file" accept="image/*" id="cf-archivo">📷 Tomar o elegir foto</label></div>
+      </section>
+      <section class="tarjeta">
+        <label class="interruptor"><span>🍕 Es mi comida libre</span><input id="cf-libre" type="checkbox" ${f.libre ? "checked" : ""} ${libreDisponible ? "" : "disabled"}></label>
+        <p class="ayuda">${lib.usada_hoy && !f.libre ? "Ya usaste la comida libre de hoy." : !libreDisponible ? "No te quedan comidas libres este mes." :
+          `Quedan ${lib.quedan} de ${lib.total} este mes${lib.recompensa ? " · 🎁 +1 de recompensa" : ""}${lib.regalo_juntos ? " · 💞 hoy hay una de regalo si comen juntos" : ""}. Máximo una por día.`}</p>
+        <div id="cf-saludable-c" ${f.libre ? "hidden" : ""} style="margin-top:14px">
+          <span class="grupo-titulo">¿Cómo la clasificas?</span>
+          <div class="opciones" id="cf-saludable">
+            <label><input type="radio" name="cf-sal" value="1" ${f.saludable ? "checked" : ""}><span>🥗 Saludable</span></label>
+            <label><input type="radio" name="cf-sal" value="0" ${f.saludable === false ? "checked" : ""}><span>No saludable</span></label>
+          </div>
+        </div>
+        <span class="grupo-titulo" style="margin-top:16px">¿Dónde?</span>
+        <div class="chips" id="cf-contexto">${CONTEXTOS.map(([k, n]) => `<button type="button" data-cf-ctx="${k}" aria-pressed="${f.contexto === k}">${n}</button>`).join("")}</div>
+        <label class="interruptor" style="margin-top:16px"><span>💞 Comimos juntos</span><input id="cf-juntos" type="checkbox" ${f.juntos ? "checked" : ""}></label>
+      </section>
+      <section class="tarjeta">
+        <h3>🔒 Alimentos y nutrientes</h3>
+        <p>Privado: tu pareja no ve calorías${perfil.compartir_macros ? "" : " ni macros"}.</p>
+        <div id="cf-items" class="lista" style="margin-top:12px"></div>
+        <div class="acciones-juntos"><button type="button" class="secundario" style="margin:0" data-cf-add="catalogo">+ De mis alimentos</button>
+          <button type="button" class="secundario" style="margin:0" data-cf-add="manual">+ Escribir valores</button></div>
+        <p class="ayuda" id="cf-total"></p>
+        <p class="ayuda">En la fase 9 se podrán buscar alimentos, escanear códigos de barras y estimar desde la foto.</p>
+      </section>
+      <section class="tarjeta">
+        <span class="grupo-titulo">¿Cómo te sientes después de comer? (opcional)</span>
+        <div class="chips" id="cf-sent">${SENTIMIENTOS.map(([k, n]) => `<button type="button" data-cf-sent="${k}" aria-pressed="${f.sentimiento === k}">${n}</button>`).join("")}</div>
+        <div class="campo" style="margin-top:14px"><label for="cf-notas">Notas</label><textarea id="cf-notas" maxlength="500">${esc(base?.notas || "")}</textarea></div>
+      </section>
+      <button type="button" class="boton-principal" id="cf-guardar">${editId ? "Guardar cambios" : "Guardar comida"}</button>
+      <button type="button" class="secundario" data-accion-comida="volver">Cancelar</button>`;
+
+    const marcar = (cont, sel, attr, valor) => cont.querySelectorAll(sel).forEach((b) => b.setAttribute("aria-pressed", b.dataset[attr] === valor));
+    const pintarItems = () => {
+      $("cf-items").innerHTML = f.items.length ? f.items.map((i, n) => `
+        <div class="item" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
+          <span><strong>${esc(i.nombre)}</strong><span class="meta">×${r1(i.cantidad)}${i.unidad ? " " + esc(i.unidad) : ""} · ${Math.round(i.kcal)} kcal · P ${r1(i.proteina)} · C ${r1(i.carbohidratos)} · G ${r1(i.grasas)}</span></span>
+          <button type="button" class="enlace" data-cf-quitar="${n}" style="width:auto;margin:0">Quitar</button>
+        </div>`).join("") : `<p class="ayuda" style="margin:0">Sin alimentos todavía (opcional, pero necesario para contar calorías y macros).</p>`;
+      const t = (k) => f.items.reduce((a, i) => a + Number(i[k] || 0), 0);
+      $("cf-total").textContent = f.items.length ? `Total: ${Math.round(t("kcal"))} kcal · Proteína ${r1(t("proteina"))} g · Carbohidratos ${r1(t("carbohidratos"))} g · Azúcares ${r1(t("azucares"))} g · Grasas ${r1(t("grasas"))} g · Fibra ${r1(t("fibra"))} g` : "";
+    };
+    pintarItems();
+
+    $("cf-cat").addEventListener("click", (e) => { const b = e.target.closest("[data-cf-cat]"); if (!b) return; f.categoria = b.dataset.cfCat; marcar($("cf-cat"), "button", "cfCat", f.categoria); });
+    $("cf-contexto").addEventListener("click", (e) => { const b = e.target.closest("[data-cf-ctx]"); if (!b) return; f.contexto = f.contexto === b.dataset.cfCtx ? null : b.dataset.cfCtx; marcar($("cf-contexto"), "button", "cfCtx", f.contexto); });
+    $("cf-sent").addEventListener("click", (e) => { const b = e.target.closest("[data-cf-sent]"); if (!b) return; f.sentimiento = f.sentimiento === b.dataset.cfSent ? null : b.dataset.cfSent; marcar($("cf-sent"), "button", "cfSent", f.sentimiento); });
+    $("cf-libre").addEventListener("change", (e) => { f.libre = e.target.checked; $("cf-saludable-c").hidden = f.libre; });
+    $("cf-archivo").addEventListener("change", (e) => {
+      f.foto = e.target.files[0] || null;
+      if (f.foto) $("cf-foto").innerHTML = `<div class="galeria"><img src="${URL.createObjectURL(f.foto)}" alt="Foto de la comida"></div>`;
+    });
+    $("cf-items").addEventListener("click", (e) => { const b = e.target.closest("[data-cf-quitar]"); if (!b) return; f.items.splice(Number(b.dataset.cfQuitar), 1); pintarItems(); });
+    $("cf-copiar")?.addEventListener("change", async (e) => {
+      const id = Number(e.target.value); if (!id) return;
+      const [{ data: c }, { data: its }] = await Promise.all([
+        db.from("comidas").select("*").eq("id", id).single(), db.from("comida_items").select("*").eq("comida_id", id)]);
+      if (!c) return;
+      $("cf-nombre").value = c.nombre || ""; f.categoria = c.categoria; marcar($("cf-cat"), "button", "cfCat", f.categoria);
+      f.contexto = c.contexto; marcar($("cf-contexto"), "button", "cfCtx", f.contexto);
+      if (!f.libre) document.querySelector(`input[name="cf-sal"][value="${c.saludable ? 1 : 0}"]`).checked = true;
+      f.items = (its || []).map(({ id: _i, comida_id: _c, ...resto }) => resto); pintarItems();
+      avisar("Comida copiada: revisa las cantidades y agrega la foto.", "ok");
+    });
+
+    // Añadir alimentos
+    const agregar = (item) => { f.items.push(item); pintarItems(); };
+    $("vista").querySelectorAll("[data-cf-add]").forEach((b) => b.addEventListener("click", () =>
+      b.dataset.cfAdd === "catalogo" ? hojaCatalogo(agregar) : hojaManual(agregar)));
+
+    $("cf-guardar").addEventListener("click", async (ev) => {
+      const boton = ev.target;
+      const nombre = $("cf-nombre").value.trim();
+      const saludable = f.libre ? false : document.querySelector('input[name="cf-sal"]:checked')?.value === "1";
+      if (!f.categoria) return avisar("Elige qué comida es (desayuno, almuerzo…).");
+      if (!nombre) return avisar("Escribe el nombre de la comida.");
+      if (!editId && !f.foto) return avisar("Agrega la foto de la comida.");
+      if (!f.libre && !document.querySelector('input[name="cf-sal"]:checked')) return avisar("Clasifícala como saludable o no saludable.");
+      boton.disabled = true; boton.textContent = "Guardando…";
+      const campos = { nombre, categoria: f.categoria, hora: $("cf-hora").value || null, saludable, contexto: f.contexto,
+        sentimiento: f.sentimiento, es_libre: f.libre, notas: $("cf-notas").value.trim() || null };
+      let id = editId, creada = false;
+      try {
+        if (!editId) {
+          const r = await db.from("comidas").insert({ ...campos, user_id: usuario.id, fecha, juntos: $("cf-juntos").checked ? "pendiente" : "no" }).select("id").single();
+          if (r.error) throw r.error;
+          id = r.data.id; creada = true;
+        } else {
+          if (base.juntos === "no" && $("cf-juntos").checked) campos.juntos = "pendiente";
+          if (base.juntos !== "no" && !$("cf-juntos").checked) campos.juntos = "no";
+          const r = await db.from("comidas").update(campos).eq("id", editId);
+          if (r.error) throw r.error;
+        }
+        if (f.foto) {
+          boton.textContent = "Subiendo foto…";
+          const ruta = `${usuario.id}/${id}-${Date.now()}.jpg`;
+          const up = await db.storage.from("comidas").upload(ruta, await comprimir(f.foto, 1024, 0.65), { contentType: "image/jpeg" });
+          if (up.error) throw up.error;
+          const r = await db.from("comidas").update({ foto_ruta: ruta, foto_hasta: new Date(Date.now() + 24 * 3600 * 1000).toISOString(), foto_borrada: false, estado: "completa" }).eq("id", id);
+          if (r.error) throw r.error;
+        }
+        if (editId) await db.from("comida_items").delete().eq("comida_id", id);
+        if (f.items.length) {
+          const r = await db.from("comida_items").insert(f.items.map((i) => ({
+            comida_id: id, user_id: usuario.id, alimento_id: i.alimento_id || null, nombre: i.nombre, cantidad: i.cantidad || 1, unidad: i.unidad || null,
+            kcal: i.kcal || 0, proteina: i.proteina || 0, carbohidratos: i.carbohidratos || 0, azucares: i.azucares || 0, grasas: i.grasas || 0, fibra: i.fibra || 0 })));
+          if (r.error) throw r.error;
+        }
+        avisar(editId ? "Comida actualizada." : "Comida guardada. 🍽️", "ok");
+        irA("comida");
+      } catch (err) {
+        if (creada) await db.from("comidas").delete().eq("id", id);
+        boton.disabled = false; boton.textContent = editId ? "Guardar cambios" : "Guardar comida";
+        avisar("No se pudo guardar: " + errorLegible(err));
+      }
+    });
+  }
+
+  // ---------- Hojas para añadir alimentos
+  function camposNutrientes(pref = {}) {
+    return `
+      <div class="fila campo"><div><label for="mn-kcal">Calorías (kcal)</label><input id="mn-kcal" type="number" inputmode="decimal" min="0" value="${pref.kcal ?? ""}"></div>
+        <div><label for="mn-proteina">Proteína (g)</label><input id="mn-proteina" type="number" inputmode="decimal" min="0" value="${pref.proteina ?? ""}"></div></div>
+      <div class="fila campo"><div><label for="mn-carbohidratos">Carbohidratos (g)</label><input id="mn-carbohidratos" type="number" inputmode="decimal" min="0" value="${pref.carbohidratos ?? ""}"></div>
+        <div><label for="mn-azucares">Azúcares (g)</label><input id="mn-azucares" type="number" inputmode="decimal" min="0" value="${pref.azucares ?? ""}"></div></div>
+      <div class="fila campo"><div><label for="mn-grasas">Grasas (g)</label><input id="mn-grasas" type="number" inputmode="decimal" min="0" value="${pref.grasas ?? ""}"></div>
+        <div><label for="mn-fibra">Fibra (g)</label><input id="mn-fibra" type="number" inputmode="decimal" min="0" value="${pref.fibra ?? ""}"></div></div>`;
+  }
+  const leerNutrientes = () => Object.fromEntries(["kcal", "proteina", "carbohidratos", "azucares", "grasas", "fibra"].map((k) => [k, Number($("mn-" + k).value || 0)]));
+
+  function hojaManual(agregar) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Escribir valores</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Los valores de la etiqueta o de una porción conocida.</p>
+      <div class="fila campo"><div><label for="mn-nombre">Alimento</label><input id="mn-nombre" maxlength="120" placeholder="Ej.: Yogur griego"></div>
+        <div><label for="mn-porcion">Porción</label><input id="mn-porcion" maxlength="40" placeholder="Ej.: 1 taza"></div></div>
+      ${camposNutrientes()}
+      <label class="interruptor"><span>Guardar en mis alimentos</span><input id="mn-guardar-cat" type="checkbox" checked></label>
+      <button type="button" class="boton-principal" id="mn-ok" style="margin-top:14px">Añadir</button>`);
+    $("mn-ok").addEventListener("click", async () => {
+      const nombre = $("mn-nombre").value.trim();
+      if (!nombre) return avisar("Escribe el nombre del alimento.");
+      const n = leerNutrientes(), porcion = $("mn-porcion").value.trim() || "1 porción";
+      let alimento_id = null;
+      if ($("mn-guardar-cat").checked) {
+        const r = await db.from("alimentos").upsert({ user_id: usuario.id, nombre, porcion, ...n }, { onConflict: "user_id,nombre,porcion" }).select("id").single();
+        if (!r.error) alimento_id = r.data.id;
+      }
+      agregar({ alimento_id, nombre, cantidad: 1, unidad: porcion, ...n });
+      cerrarHoja();
+    });
+  }
+
+  async function hojaCatalogo(agregar) {
+    const { data } = await db.from("alimentos").select("*").eq("user_id", usuario.id).order("veces_usado", { ascending: false }).order("nombre");
+    const lista = data || [];
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Mis alimentos</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      ${lista.length ? `<input id="ct-buscar" type="search" placeholder="Buscar…" style="margin-bottom:12px">
+        <div class="lista" id="ct-lista"></div>` : `<p class="vacio">Todavía no guardaste alimentos. Usa "Escribir valores" y deja activado "Guardar en mis alimentos".</p>`}`);
+    if (!lista.length) return;
+    const pintar = (q = "") => {
+      $("ct-lista").innerHTML = lista.filter((a) => a.nombre.toLowerCase().includes(q.toLowerCase())).map((a) => `
+        <div class="item" style="grid-template-columns:minmax(0,1fr) 92px;min-height:0">
+          <span><strong>${esc(a.nombre)}</strong><span class="meta">${esc(a.porcion)} · ${Math.round(a.kcal)} kcal · P ${r1(a.proteina)} g</span></span>
+          <span style="display:grid;gap:6px"><input type="number" inputmode="decimal" min="0.25" step="0.25" value="1" data-ct-cant="${a.id}" aria-label="Porciones" style="height:38px;padding:0 8px;text-align:center">
+            <button type="button" data-ct-add="${a.id}" style="min-height:36px;font-size:.88rem">Añadir</button></span>
+        </div>`).join("") || `<p class="vacio">Sin resultados.</p>`;
+    };
+    pintar();
+    $("ct-buscar").addEventListener("input", (e) => pintar(e.target.value));
+    $("ct-lista").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-ct-add]"); if (!b) return;
+      const a = lista.find((x) => x.id === Number(b.dataset.ctAdd));
+      const k = Number(document.querySelector(`[data-ct-cant="${a.id}"]`).value || 1);
+      agregar({ alimento_id: a.id, nombre: a.nombre, cantidad: k, unidad: a.porcion,
+        kcal: a.kcal * k, proteina: a.proteina * k, carbohidratos: a.carbohidratos * k, azucares: a.azucares * k, grasas: a.grasas * k, fibra: a.fibra * k });
+      db.from("alimentos").update({ veces_usado: (a.veces_usado || 0) + 1 }).eq("id", a.id);
+      cerrarHoja(); avisar(`${a.nombre} añadido.`, "ok");
+    });
+  }
+
+  // ---------- Comida saltada y cierre del día
+  function hojaSaltada() {
+    let cat = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Comida saltada</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">No necesita foto.</p>
+      <div class="chips" id="sl-cat">${CATEGORIAS.map(([k, e, n]) => `<button type="button" data-sl="${k}" aria-pressed="false">${e} ${n}</button>`).join("")}</div>
+      <button type="button" class="boton-principal" id="sl-ok" style="margin-top:16px">Registrar</button>`);
+    $("sl-cat").addEventListener("click", (e) => { const b = e.target.closest("[data-sl]"); if (!b) return; cat = b.dataset.sl; $("sl-cat").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b)); });
+    $("sl-ok").addEventListener("click", async () => {
+      if (!cat) return avisar("Elige qué comida saltaste.");
+      const ahora = new Date();
+      const r = await db.from("comidas").insert({ user_id: usuario.id, fecha: comidaFecha, categoria: cat, saltada: true, estado: "completa",
+        hora: String(ahora.getHours()).padStart(2, "0") + ":" + String(ahora.getMinutes()).padStart(2, "0") });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Comida saltada registrada.", "ok"); vistaComida();
+    });
+  }
+
+  async function hojaCerrarDia() {
+    const { data: d } = await db.rpc("resumen_dia_comida", { p_user: usuario.id, p_fecha: comidaFecha });
+    const comidas = (d?.comidas || []).filter((c) => c.estado === "completa");
+    const mensaje = d?.comidas_min
+      ? `¿Seguro que estas fueron todas tus comidas de hoy, y cada una tiene su foto? Registrar comidas que no hiciste suma puntos falsos y le quita sentido al desafío. Juega limpio. 💙`
+      : `¿Seguro que estas fueron todas tus comidas de hoy? training.us funciona porque los dos confían en lo que registran. Omitir una comida para cuidar tus puntos rompe esa confianza y le quita sentido al desafío. 💗`;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Cerrar mi día</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <div class="lista" style="margin-bottom:14px">${comidas.length ? comidas.map((c) => `<p class="ayuda" style="margin:0">${CAT[c.categoria].emoji} ${c.saltada ? CAT[c.categoria].nombre + " saltado" : esc(c.nombre)}</p>`).join("") : `<p class="aviso">No registraste comidas hoy: el día contará como 0 %.</p>`}</div>
+      <p class="aviso">${mensaje}</p>
+      <button type="button" class="boton-principal" id="cd-ok" style="margin-top:14px">Sí, son todas</button>
+      <button type="button" class="secundario" data-cerrar-hoja>Todavía me falta registrar algo</button>`);
+    $("cd-ok").addEventListener("click", async () => {
+      const r = await db.rpc("cerrar_dia_comida", { p_fecha: comidaFecha });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Día cerrado. ¡Gracias por registrar todo! ✨", "ok"); vistaComida();
+    });
+  }
+
+  // Borra del almacenamiento mis fotos de comida que ya cumplieron 24 horas
+  async function limpiarFotosComida() {
+    const { data } = await db.from("comidas").select("id, foto_ruta").eq("user_id", usuario.id).eq("foto_borrada", false)
+      .not("foto_ruta", "is", null).lt("foto_hasta", new Date().toISOString()).limit(60);
+    if (!data?.length) return;
+    const del = await db.storage.from("comidas").remove(data.map((c) => c.foto_ruta));
+    if (!del.error) await db.rpc("marcar_fotos_comida_borradas", { p_ids: data.map((c) => c.id) });
+  }
+
+  async function accionesComida(e) {
+    const t = e.target;
+    const dia = t.closest("[data-dia-comida]");
+    if (dia) { comidaFecha = sumarDias(comidaFecha, Number(dia.dataset.diaComida)); if (comidaFecha > yo().hoy) comidaFecha = yo().hoy; return vistaComida(); }
+    const de = t.closest("[data-comida-de]");
+    if (de) { comidaDe = de.dataset.comidaDe; return vistaComida(); }
+    const ac = t.closest("[data-accion-comida]");
+    if (ac) {
+      const a = ac.dataset.accionComida;
+      if (a === "nueva") return vistaFormComida(null);
+      if (a === "saltada") return hojaSaltada();
+      if (a === "cerrar") return hojaCerrarDia();
+      if (a === "volver") return irA("comida");
+    }
+    const it = t.closest("[data-comida]");
+    if (it) return verComida(Number(it.dataset.comida));
+    const ed = t.closest("[data-editar-comida]");
+    if (ed) { cerrarHoja(); return vistaFormComida(Number(ed.dataset.editarComida)); }
+    const bo = t.closest("[data-borrar-comida]");
+    if (bo) {
+      if (!confirm("¿Eliminar esta comida?")) return;
+      const id = Number(bo.dataset.borrarComida);
+      const { data: c } = await db.from("comidas").select("foto_ruta").eq("id", id).single();
+      const r = await db.from("comidas").delete().eq("id", id);
+      if (r.error) return avisar(errorLegible(r.error));
+      if (c?.foto_ruta) db.storage.from("comidas").remove([c.foto_ruta]);
+      cerrarHoja(); avisar("Comida eliminada.", "ok"); return vistaComida();
+    }
+    const cj = t.closest("[data-comida-juntos]");
+    if (cj) {
+      cj.disabled = true;
+      const r = await db.rpc("responder_comida_juntos", { p_id: Number(cj.dataset.id), p_acepta: cj.dataset.comidaJuntos === "si" });
+      if (r.error) { cj.disabled = false; return avisar(errorLegible(r.error)); }
+      avisar(r.data === "confirmado" ? "Confirmado: comieron juntos. 💞" : "Anotado.", "ok"); cerrarHoja(); return vistaComida();
+    }
+  }
+  $("vista").addEventListener("click", accionesComida);
+  $("hoja").addEventListener("click", accionesComida);
+
+  // ================================================================ MÁS (fase 8)
+  function vistaMas() {
+    vistaActual = "mas";
+    $("vista").innerHTML = `
+      <h2 class="titulo">Más</h2>
+      <div class="lista">
+        ${[["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
+           ["ausencias", "📝", "Ausencias y cupos"], ["perfil", "👤", "Perfil y notificaciones"]].map(([v, e, n]) => `
+          <button type="button" class="item" data-ir="${v}" style="min-height:64px"><span class="mini">${e}</span><span><strong>${n}</strong></span><span class="lado">›</span></button>`).join("")}
+      </div>`;
+  }
+  $("vista").addEventListener("click", (e) => { const b = e.target.closest("[data-ir]"); if (b) irA(b.dataset.ir); });
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>

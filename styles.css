@@ -366,3 +366,13 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .historial { margin-top: 14px; }
 .historial summary { font-weight: 600; color: var(--texto-suave); cursor: pointer; }
 .reto .etiqueta { background: var(--superficie); }
+
+/* ===================== Fase 8: comida ===================== */
+.nav-dia { display: grid; grid-template-columns: 48px minmax(0,1fr) 48px; align-items: center; gap: 8px; margin: 6px 0 12px; text-align: center; }
+.nav-dia button { min-height: 44px; padding: 0; font-size: 1.6rem; background: var(--superficie); color: var(--texto); border: 1px solid var(--borde); }
+.nav-dia strong { font-size: 1.05rem; text-transform: capitalize; }
+.etiqueta-ok { background: #E3EFE3; color: #2F5B32; }
+.nutri-fila { padding: 8px 0; }
+.nutri-cab { display: flex; justify-content: space-between; gap: 12px; font-size: .92rem; }
+.nutri-cab span { color: var(--texto-suave); }
+.nutri-fila .progreso { margin-top: 6px; height: 8px; }
