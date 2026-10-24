@@ -316,6 +316,7 @@
       return `${s.obligatorios}/${s.meta_efectiva}${faltan > 0 ? ` <small>faltan ${faltan}</small>` : " ✓"}`;
     };
     const mesTxt = (x) => {
+      if (!x.semana && !x.mes.meta) return "—";
       const s = x.semana || { obligatorios: 0, meta_efectiva: 0 };
       return pct(x.mes.obligatorios + s.obligatorios, x.mes.meta + s.meta_efectiva) + " %";
     };
@@ -336,7 +337,7 @@
         <div class="fila-stat cabecera"><span></span><strong class="${tema(pa)}">${nom(pa)}</strong>${b ? `<strong class="${tema(pb)}">${nom(pb)}</strong>` : ""}</div>
         ${fila("Esta semana", semanaTxt)}
         ${fila("Cumplimiento del mes", mesTxt)}
-        ${fila("🔥 Racha semanal", (x) => r(x, "semanal"))}
+        ${fila("🔥 Racha semanal", (x) => x.semana ? r(x, "semanal") : "—")}
         ${fila("📅 Racha diaria", (x) => r(x, "diaria"))}
         ${fila("🏅 Meses perfectos seguidos", (x) => r(x, "mensual"))}
         ${fila("Adicionales este mes", (x) => x.mes.extras + (x.semana?.extras || 0))}

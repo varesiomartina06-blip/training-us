@@ -1,6 +1,6 @@
 // training.us — service worker (fase 0).
 // Guarda la "cáscara" de la app para que abra rápido. Nunca guarda datos de Supabase.
-const CACHE = "training-us-v12";
+const CACHE = "training-us-v13";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./config.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png",
@@ -26,7 +26,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
   // Red primero (para recibir siempre la versión nueva); caché si no hay conexión.
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: "no-cache" })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy));

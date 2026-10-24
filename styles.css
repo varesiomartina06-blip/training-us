@@ -376,3 +376,11 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .nutri-cab { display: flex; justify-content: space-between; gap: 12px; font-size: .92rem; }
 .nutri-cab span { color: var(--texto-suave); }
 .nutri-fila .progreso { margin-top: 6px; height: 8px; }
+
+/* ===================== Corrección: franja superior ===================== */
+#app::before { display: none; }
+.barra-superior {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 35; pointer-events: none;
+  height: max(env(safe-area-inset-top, 0px), 0px);
+  background: var(--fondo);
+}
