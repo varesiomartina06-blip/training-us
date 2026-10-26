@@ -394,3 +394,17 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .boton-archivo input { display: none; }
 .coach-texto { white-space: pre-wrap; line-height: 1.55; color: var(--texto) !important; margin: 6px 0 0; }
 .msg.suyo.coach { background: var(--superficie); border: 1px solid var(--borde); color: var(--texto); white-space: pre-wrap; }
+
+/* ===================== Fase 9B: nutrición avanzada ===================== */
+.estrella { display: inline; width: auto; min-height: 0; padding: 0 2px; background: none; color: #D9C7BE; font-size: 1.05rem; }
+.estrella.on { color: #E3A72F; }
+.tabla-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 8px 0; }
+.tabla-reporte { width: 100%; border-collapse: collapse; font-size: .8rem; font-variant-numeric: tabular-nums; background: var(--superficie); }
+.tabla-reporte th, .tabla-reporte td { padding: 6px 5px; border-bottom: 1px solid var(--borde); text-align: right; white-space: nowrap; }
+.tabla-reporte th:first-child, .tabla-reporte td:first-child { text-align: left; }
+@media print {
+  .pestanas, .no-imprimir, .barra-superior, .mensaje { display: none !important; }
+  body, html { background: #fff !important; }
+  .vista { padding: 0 !important; max-width: none; }
+  .tarjeta { break-inside: avoid; }
+}
