@@ -384,3 +384,13 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
   height: max(env(safe-area-inset-top, 0px), 0px);
   background: var(--fondo);
 }
+
+/* ===================== Fase 9: alimentos e IA ===================== */
+.botones-alimento { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 12px; }
+.botones-alimento button.secundario { margin: 0; font-size: .92rem; padding: 0 10px; }
+.lector { width: 100%; border-radius: 16px; overflow: hidden; background: #000; min-height: 220px; }
+.lector video { width: 100% !important; height: auto !important; }
+.boton-archivo { display: grid; place-items: center; min-height: var(--alto-control); border-radius: var(--radio-campo); border: 1px solid var(--borde); font-weight: 600; margin: 0; cursor: pointer; }
+.boton-archivo input { display: none; }
+.coach-texto { white-space: pre-wrap; line-height: 1.55; color: var(--texto) !important; margin: 6px 0 0; }
+.msg.suyo.coach { background: var(--superficie); border: 1px solid var(--borde); color: var(--texto); white-space: pre-wrap; }

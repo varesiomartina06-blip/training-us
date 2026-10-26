@@ -167,7 +167,7 @@
     if (v === "registrar") v = "entrenar";
     if (v === "comida-form") v = "comida";
     vistaActual = v;
-    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil"].includes(v) ? "mas" : v;
+    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil", "coach"].includes(v) ? "mas" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
       if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
@@ -182,6 +182,7 @@
     else if (v === "multas") vistaMultas();
     else if (v === "comida") vistaComida();
     else if (v === "mas") vistaMas();
+    else if (v === "coach") vistaCoach();
     else vistaPerfil(false);
   }
 
@@ -419,7 +420,9 @@
           <label class="op-azul"><input type="radio" name="pf-tema" value="azul" ${temaDefecto === "azul" ? "checked" : ""}><span>Azul</span></label>
         </div>
         ${esPrimeraVez ? "" : `<label class="interruptor campo"><span>Compartir mis macros con mi pareja</span><input id="pf-macros" type="checkbox" ${perfil.compartir_macros ? "checked" : ""}></label>
-        <p class="ayuda" style="margin:-10px 0 16px">Proteína, carbohidratos, azúcares, grasas y fibra. Las calorías nunca se comparten.</p>`}
+        <p class="ayuda" style="margin:-10px 0 16px">Proteína, carbohidratos, azúcares, grasas y fibra. Las calorías nunca se comparten.</p>
+        <label class="interruptor campo"><span>🤖 Coach con IA</span><input id="pf-coach" type="checkbox" ${perfil.coach_activo ? "checked" : ""}></label>
+        <p class="ayuda" style="margin:-10px 0 16px">Comenta tus comidas, estima alimentos y responde dudas. Solo usa tus propios datos.</p>`}
         <button type="submit" class="boton-principal">${esPrimeraVez ? "Guardar y continuar" : "Guardar cambios"}</button>
         ${esPrimeraVez ? "" : `<button type="button" id="btn-salir" class="secundario">Cerrar sesión</button>`}
       </form>`;
@@ -441,6 +444,7 @@
         completado: true
       };
       if ($("pf-macros")) datos.compartir_macros = $("pf-macros").checked;
+      if ($("pf-coach")) datos.coach_activo = $("pf-coach").checked;
       const peso = esPrimeraVez ? Number($("pf-peso").value) : null;
       if (!datos.nombre || !datos.fecha_nacimiento || !datos.sexo || !datos.estatura_cm || !datos.tema)
         return avisar("Completa nombre, fecha de nacimiento, sexo, estatura y color.");
@@ -2336,6 +2340,7 @@
       <div id="comidas-pendientes"></div>
       ${editable ? `
         <button type="button" class="boton-principal" data-accion-comida="nueva">Registrar comida</button>
+        ${esHoy && perfil.coach_activo ? `<button type="button" class="secundario" data-accion-comida="que-comer">🤖 ¿Qué como ahora?</button>` : ""}
         <div class="acciones-juntos" style="margin:10px 0 18px">
           <button type="button" class="secundario" style="margin:0" data-accion-comida="saltada">⏭️ Comida saltada</button>
           ${!d.cerrado ? `<button type="button" class="secundario" style="margin:0" data-accion-comida="cerrar">✅ Cerrar mi día</button>` : `<button type="button" class="secundario" style="margin:0" disabled>Día cerrado ✓</button>`}
@@ -2364,6 +2369,7 @@
     if (error) return avisar(errorLegible(error));
     const esMio = c.user_id === usuario.id;
     const items = esMio ? (await db.from("comida_items").select("*").eq("comida_id", id)).data || [] : [];
+    const comentario = esMio ? (await db.from("coach_comentarios").select("texto").eq("comida_id", id).maybeSingle()).data?.texto : null;
     const url = fotoVigente(c) ? (await urlsComidas([c.foto_ruta]))[c.foto_ruta] : null;
     const editable = esMio && (c.fecha >= sumarDias(yo().hoy, -1) || antesDelInicio());
     const tot = (k) => items.reduce((a, i) => a + Number(i[k] || 0), 0);
@@ -2380,6 +2386,7 @@
         ${items.map((i) => `<div class="fila-stat" style="grid-template-columns:minmax(0,1fr) auto"><span>${esc(i.nombre)} <small>×${r1(i.cantidad)}${i.unidad ? " " + esc(i.unidad) : ""}</small></span><strong>${Math.round(i.kcal)} kcal</strong></div>`).join("")}
         <p class="ayuda">Total: ${Math.round(tot("kcal"))} kcal · P ${r1(tot("proteina"))} g · C ${r1(tot("carbohidratos"))} g · Az ${r1(tot("azucares"))} g · G ${r1(tot("grasas"))} g · F ${r1(tot("fibra"))} g</p></section>` : ""}
       ${c.notas ? `<section class="tarjeta"><h3>Notas</h3><p>${esc(c.notas)}</p></section>` : ""}
+      ${comentario ? `<section class="tarjeta"><h3>🤖 Coach</h3><p class="coach-texto">${esc(comentario)}</p></section>` : ""}
       ${!esMio && c.juntos === "pendiente" ? `<div class="acciones-juntos"><button type="button" data-comida-juntos="si" data-id="${c.id}">Comimos juntos</button>
         <button type="button" class="secundario" style="margin:0" data-comida-juntos="no" data-id="${c.id}">No fue juntos</button></div>` : ""}
       ${editable ? `<div class="acciones-juntos" style="margin-top:16px">
@@ -2447,10 +2454,16 @@
         <h3>🔒 Alimentos y nutrientes</h3>
         <p>Privado: tu pareja no ve calorías${perfil.compartir_macros ? "" : " ni macros"}.</p>
         <div id="cf-items" class="lista" style="margin-top:12px"></div>
-        <div class="acciones-juntos"><button type="button" class="secundario" style="margin:0" data-cf-add="catalogo">+ De mis alimentos</button>
-          <button type="button" class="secundario" style="margin:0" data-cf-add="manual">+ Escribir valores</button></div>
+        <div class="botones-alimento">
+          <button type="button" class="secundario" data-cf-add="buscar">🔎 Buscar</button>
+          <button type="button" class="secundario" data-cf-add="escanear">📷 Escanear código</button>
+          <button type="button" class="secundario" data-cf-add="catalogo">📚 Mis alimentos</button>
+          <button type="button" class="secundario" data-cf-add="manual">✏️ Escribir valores</button>
+          ${perfil.coach_activo ? `<button type="button" class="secundario" data-cf-add="foto">🤖 Desde la foto</button>
+          <button type="button" class="secundario" data-cf-add="describir">🤖 Describir</button>` : ""}
+        </div>
         <p class="ayuda" id="cf-total"></p>
-        <p class="ayuda">En la fase 9 se podrán buscar alimentos, escanear códigos de barras y estimar desde la foto.</p>
+        ${perfil.coach_activo ? `<p class="ayuda">Lo estimado por IA es aproximado: revisa las cantidades.</p>` : ""}
       </section>
       <section class="tarjeta">
         <span class="grupo-titulo">¿Cómo te sientes después de comer? (opcional)</span>
@@ -2464,7 +2477,8 @@
     const pintarItems = () => {
       $("cf-items").innerHTML = f.items.length ? f.items.map((i, n) => `
         <div class="item" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
-          <span><strong>${esc(i.nombre)}</strong><span class="meta">×${r1(i.cantidad)}${i.unidad ? " " + esc(i.unidad) : ""} · ${Math.round(i.kcal)} kcal · P ${r1(i.proteina)} · C ${r1(i.carbohidratos)} · G ${r1(i.grasas)}</span></span>
+          <span><strong>${esc(i.nombre)}</strong><span class="meta">${i.unidad === "g" ? r1(i.cantidad) + " g" : "×" + r1(i.cantidad) + (i.unidad ? " " + esc(i.unidad) : "")} · ${Math.round(i.kcal)} kcal · P ${r1(i.proteina)} · C ${r1(i.carbohidratos)} · G ${r1(i.grasas)}</span>
+            ${i.fuente === "ia" ? `<span class="etiqueta etiqueta-aviso">🤖 Estimado</span>` : ""}</span>
           <button type="button" class="enlace" data-cf-quitar="${n}" style="width:auto;margin:0">Quitar</button>
         </div>`).join("") : `<p class="ayuda" style="margin:0">Sin alimentos todavía (opcional, pero necesario para contar calorías y macros).</p>`;
       const t = (k) => f.items.reduce((a, i) => a + Number(i[k] || 0), 0);
@@ -2495,8 +2509,16 @@
 
     // Añadir alimentos
     const agregar = (item) => { f.items.push(item); pintarItems(); };
-    $("vista").querySelectorAll("[data-cf-add]").forEach((b) => b.addEventListener("click", () =>
-      b.dataset.cfAdd === "catalogo" ? hojaCatalogo(agregar) : hojaManual(agregar)));
+    const agregarVarios = (lista) => { f.items.push(...lista); pintarItems(); };
+    $("vista").querySelectorAll("[data-cf-add]").forEach((b) => b.addEventListener("click", () => {
+      const a = b.dataset.cfAdd;
+      if (a === "buscar") return hojaBuscar(agregar);
+      if (a === "escanear") return hojaEscanear(agregar);
+      if (a === "catalogo") return hojaCatalogo(agregar);
+      if (a === "foto") return estimarFoto(f.foto, agregarVarios, b);
+      if (a === "describir") return hojaDescribir(agregarVarios);
+      return hojaManual(agregar);
+    }));
 
     $("cf-guardar").addEventListener("click", async (ev) => {
       const boton = ev.target;
@@ -2533,11 +2555,13 @@
         if (f.items.length) {
           const r = await db.from("comida_items").insert(f.items.map((i) => ({
             comida_id: id, user_id: usuario.id, alimento_id: i.alimento_id || null, nombre: i.nombre, cantidad: i.cantidad || 1, unidad: i.unidad || null,
+            fuente: i.fuente || (i.alimento_id ? "catalogo" : "manual"), gramos: i.gramos || null,
             kcal: i.kcal || 0, proteina: i.proteina || 0, carbohidratos: i.carbohidratos || 0, azucares: i.azucares || 0, grasas: i.grasas || 0, fibra: i.fibra || 0 })));
           if (r.error) throw r.error;
         }
         avisar(editId ? "Comida actualizada." : "Comida guardada. 🍽️", "ok");
         irA("comida");
+        comentarComida(id, fecha);
       } catch (err) {
         if (creada) await db.from("comidas").delete().eq("id", id);
         boton.disabled = false; boton.textContent = editId ? "Guardar cambios" : "Guardar comida";
@@ -2558,12 +2582,14 @@
   }
   const leerNutrientes = () => Object.fromEntries(["kcal", "proteina", "carbohidratos", "azucares", "grasas", "fibra"].map((k) => [k, Number($("mn-" + k).value || 0)]));
 
-  function hojaManual(agregar) {
+  function hojaManual(agregar, codigo = null) {
     abrirHoja(`
       <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Escribir valores</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
       <p class="sub">Los valores de la etiqueta o de una porción conocida.</p>
+      ${codigo ? `<p class="aviso">Código ${esc(codigo)}: escribe los valores de la etiqueta y quedará guardado.</p>` : ""}
       <div class="fila campo"><div><label for="mn-nombre">Alimento</label><input id="mn-nombre" maxlength="120" placeholder="Ej.: Yogur griego"></div>
         <div><label for="mn-porcion">Porción</label><input id="mn-porcion" maxlength="40" placeholder="Ej.: 1 taza"></div></div>
+      <div class="campo"><label for="mn-gramos">Gramos de esa porción (opcional)</label><input id="mn-gramos" type="number" inputmode="decimal" min="0" placeholder="Permite registrar por gramos después"></div>
       ${camposNutrientes()}
       <label class="interruptor"><span>Guardar en mis alimentos</span><input id="mn-guardar-cat" type="checkbox" checked></label>
       <button type="button" class="boton-principal" id="mn-ok" style="margin-top:14px">Añadir</button>`);
@@ -2573,10 +2599,11 @@
       const n = leerNutrientes(), porcion = $("mn-porcion").value.trim() || "1 porción";
       let alimento_id = null;
       if ($("mn-guardar-cat").checked) {
-        const r = await db.from("alimentos").upsert({ user_id: usuario.id, nombre, porcion, ...n }, { onConflict: "user_id,nombre,porcion" }).select("id").single();
-        if (!r.error) alimento_id = r.data.id;
+        const gr = Number($("mn-gramos").value) || null;
+        const r = await db.from("alimentos").upsert({ user_id: usuario.id, nombre, porcion, gramos: gr, codigo_barras: codigo, ...n }, { onConflict: "user_id,nombre,porcion" }).select("id").single();
+        if (!r.error && r.data) alimento_id = r.data.id;
       }
-      agregar({ alimento_id, nombre, cantidad: 1, unidad: porcion, ...n });
+      agregar({ alimento_id, nombre, cantidad: 1, unidad: porcion, fuente: alimento_id ? "catalogo" : "manual", gramos: Number($("mn-gramos").value) || null, ...n });
       cerrarHoja();
     });
   }
@@ -2594,16 +2621,24 @@
         <div class="item" style="grid-template-columns:minmax(0,1fr) 92px;min-height:0">
           <span><strong>${esc(a.nombre)}</strong><span class="meta">${esc(a.porcion)} · ${Math.round(a.kcal)} kcal · P ${r1(a.proteina)} g</span></span>
           <span style="display:grid;gap:6px"><input type="number" inputmode="decimal" min="0.25" step="0.25" value="1" data-ct-cant="${a.id}" aria-label="Porciones" style="height:38px;padding:0 8px;text-align:center">
-            <button type="button" data-ct-add="${a.id}" style="min-height:36px;font-size:.88rem">Añadir</button></span>
+            <button type="button" data-ct-add="${a.id}" style="min-height:36px;font-size:.88rem">Añadir</button>
+            ${a.gramos ? `<button type="button" class="enlace" data-ct-gramos="${a.id}" style="min-height:28px;font-size:.8rem;padding:0">En gramos</button>` : ""}</span>
         </div>`).join("") || `<p class="vacio">Sin resultados.</p>`;
     };
     pintar();
     $("ct-buscar").addEventListener("input", (e) => pintar(e.target.value));
     $("ct-lista").addEventListener("click", async (e) => {
+      const g = e.target.closest("[data-ct-gramos]");
+      if (g) {
+        const a = lista.find((x) => x.id === Number(g.dataset.ctGramos));
+        const por100 = Object.fromEntries(NKEYS.map((k) => [k, (Number(a[k]) || 0) * 100 / Number(a.gramos)]));
+        return hojaCantidad({ fuente: "catalogo", alimento_id: a.id, veces_usado: a.veces_usado, nombre: a.nombre, por100,
+          porcion: { desc: a.porcion, gramos: Number(a.gramos) } }, agregar);
+      }
       const b = e.target.closest("[data-ct-add]"); if (!b) return;
       const a = lista.find((x) => x.id === Number(b.dataset.ctAdd));
       const k = Number(document.querySelector(`[data-ct-cant="${a.id}"]`).value || 1);
-      agregar({ alimento_id: a.id, nombre: a.nombre, cantidad: k, unidad: a.porcion,
+      agregar({ alimento_id: a.id, nombre: a.nombre, cantidad: k, unidad: a.porcion, fuente: "catalogo", gramos: a.gramos ? r1(a.gramos * k) : null,
         kcal: a.kcal * k, proteina: a.proteina * k, carbohidratos: a.carbohidratos * k, azucares: a.azucares * k, grasas: a.grasas * k, fibra: a.fibra * k });
       db.from("alimentos").update({ veces_usado: (a.veces_usado || 0) + 1 }).eq("id", a.id);
       cerrarHoja(); avisar(`${a.nombre} añadido.`, "ok");
@@ -2669,6 +2704,7 @@
       if (a === "nueva") return vistaFormComida(null);
       if (a === "saltada") return hojaSaltada();
       if (a === "cerrar") return hojaCerrarDia();
+      if (a === "que-comer") return hojaQueComer();
       if (a === "volver") return irA("comida");
     }
     const it = t.closest("[data-comida]");
@@ -2702,12 +2738,251 @@
     $("vista").innerHTML = `
       <h2 class="titulo">Más</h2>
       <div class="lista">
-        ${[["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
+        ${[["coach", "🤖", "Coach"], ["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
            ["ausencias", "📝", "Ausencias y cupos"], ["perfil", "👤", "Perfil y notificaciones"]].map(([v, e, n]) => `
           <button type="button" class="item" data-ir="${v}" style="min-height:64px"><span class="mini">${e}</span><span><strong>${n}</strong></span><span class="lado">›</span></button>`).join("")}
       </div>`;
   }
   $("vista").addEventListener("click", (e) => { const b = e.target.closest("[data-ir]"); if (b) irA(b.dataset.ir); });
+
+  // ================================================================ ALIMENTOS, ESCÁNER E IA (fase 9)
+  async function llamarCoach(cuerpo) {
+    const { data, error } = await db.functions.invoke("coach", { body: { fecha: comidaFecha || yo()?.hoy, ...cuerpo } });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch (_) { /* sin detalle */ }
+      throw new Error(msg);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+  const FUENTE = { usda: "USDA", off: "Open Food Facts", catalogo: "Mis alimentos", manual: "Manual", ia: "Estimado por IA" };
+  const NKEYS = ["kcal", "proteina", "carbohidratos", "azucares", "grasas", "fibra"];
+  const escalar = (por100, gramos) => Object.fromEntries(NKEYS.map((k) => [k, r1((Number(por100?.[k]) || 0) * gramos / 100)]));
+  const resumenNutr = (n) => `${Math.round(n.kcal || 0)} kcal · P ${r1(n.proteina)} · C ${r1(n.carbohidratos)} · Az ${r1(n.azucares)} · G ${r1(n.grasas)} · F ${r1(n.fibra)}`;
+
+  // Cantidad en gramos o porciones para un alimento con valores por 100 g
+  function hojaCantidad(al, agregar) {
+    const porcionG = al.porcion?.gramos || null;
+    let modo = porcionG && al.fuente === "catalogo" ? "porciones" : "gramos";
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">${esc(al.nombre)}</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">${al.marca ? esc(al.marca) + " · " : ""}${FUENTE[al.fuente] || ""} · por 100 g: ${resumenNutr(al.por100)}</p>
+      ${porcionG ? `<div class="segmentado" id="cq-modo"><button type="button" data-cq="gramos" aria-pressed="${modo === "gramos"}">Gramos</button>
+        <button type="button" data-cq="porciones" aria-pressed="${modo === "porciones"}">Porciones (${esc(al.porcion.desc)})</button></div>` : ""}
+      <div class="campo"><label for="cq-valor" id="cq-etq">${modo === "gramos" ? "Gramos" : "Porciones"}</label>
+        <input id="cq-valor" type="number" inputmode="decimal" min="0" step="any" value="${modo === "gramos" ? 100 : 1}"></div>
+      <p class="kcal" id="cq-prev"></p>
+      ${al.fuente !== "catalogo" ? `<label class="interruptor" style="margin-top:12px"><span>Guardar en mis alimentos</span><input id="cq-guardar" type="checkbox" checked></label>` : ""}
+      <button type="button" class="boton-principal" id="cq-ok" style="margin-top:14px">Añadir</button>`);
+    const gramos = () => { const v = Number($("cq-valor").value || 0); return modo === "gramos" ? v : v * porcionG; };
+    const prev = () => { $("cq-prev").textContent = `${r1(gramos())} g → ${resumenNutr(escalar(al.por100, gramos()))}`; };
+    prev();
+    $("cq-valor").addEventListener("input", prev);
+    $("cq-modo")?.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-cq]"); if (!b) return;
+      modo = b.dataset.cq;
+      $("cq-modo").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+      $("cq-etq").textContent = modo === "gramos" ? "Gramos" : "Porciones";
+      $("cq-valor").value = modo === "gramos" ? Math.round(porcionG) : 1; prev();
+    });
+    $("cq-ok").addEventListener("click", async () => {
+      const g = gramos();
+      if (!(g > 0)) return avisar("Escribe una cantidad.");
+      let alimento_id = al.alimento_id || null;
+      if ($("cq-guardar")?.checked) {
+        const r = await db.from("alimentos").upsert({
+          user_id: usuario.id, nombre: al.nombre.slice(0, 120), porcion: porcionG ? al.porcion.desc.slice(0, 40) : "100 g",
+          gramos: porcionG || 100, fuente: al.fuente, codigo_barras: al.fuente === "off" ? al.id : null,
+          ...(porcionG ? escalar(al.por100, porcionG) : escalar(al.por100, 100))
+        }, { onConflict: "user_id,nombre,porcion" }).select("id").single();
+        if (!r.error && r.data) alimento_id = r.data.id;
+      }
+      if (al.fuente === "catalogo" && al.alimento_id) db.from("alimentos").update({ veces_usado: (al.veces_usado || 0) + 1 }).eq("id", al.alimento_id);
+      agregar({
+        alimento_id, nombre: al.nombre.slice(0, 120), gramos: r1(g),
+        cantidad: modo === "porciones" ? Number($("cq-valor").value) : r1(g), unidad: modo === "porciones" ? al.porcion.desc : "g",
+        fuente: al.fuente, ...escalar(al.por100, g)
+      });
+      cerrarHoja(); avisar(`${al.nombre} añadido.`, "ok");
+    });
+  }
+
+  // Búsqueda en USDA y Open Food Facts
+  function hojaBuscar(agregar) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Buscar alimento</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <div class="escribir" style="position:static;grid-template-columns:minmax(0,1fr) 92px">
+        <input id="bs-q" type="search" placeholder="Ej.: pechuga de pollo, avena…" enterkeyhint="search">
+        <button type="button" id="bs-ir" style="width:auto">Buscar</button>
+      </div>
+      <p class="ayuda">Productos de marca (Open Food Facts) y alimentos genéricos (USDA). Valores por 100 g.</p>
+      <div class="lista" id="bs-res" style="margin-top:12px"></div>`);
+    let resultados = [];
+    const buscar = async () => {
+      const q = $("bs-q").value.trim(); if (!q) return;
+      $("bs-res").innerHTML = `<p class="vacio">Buscando…</p>`;
+      try {
+        const d = await llamarCoach({ accion: "buscar", consulta: q });
+        resultados = d.resultados || [];
+        $("bs-res").innerHTML = resultados.length ? resultados.map((a, i) => `
+          <button type="button" class="item" data-bs="${i}" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
+            <span><strong>${esc(a.nombre)}</strong><span class="meta">${a.marca ? esc(a.marca) + " · " : ""}${FUENTE[a.fuente]} · ${Math.round(a.por100.kcal)} kcal/100 g · P ${r1(a.por100.proteina)} g</span></span>
+            <span class="lado">›</span></button>`).join("") : `<p class="vacio">Sin resultados. Prueba con otras palabras o escribe los valores a mano.</p>`;
+      } catch (err) { $("bs-res").innerHTML = ""; avisar(errorLegible(err)); }
+    };
+    $("bs-ir").addEventListener("click", buscar);
+    $("bs-q").addEventListener("keydown", (e) => { if (e.key === "Enter") buscar(); });
+    $("bs-res").addEventListener("click", (e) => { const b = e.target.closest("[data-bs]"); if (b) hojaCantidad(resultados[Number(b.dataset.bs)], agregar); });
+    setTimeout(() => $("bs-q").focus(), 300);
+  }
+
+  // Escáner de códigos de barras (cámara, o foto del código como alternativa)
+  let lectorActivo = null;
+  function cargarLibreriaLector() {
+    if (window.Html5Qrcode) return Promise.resolve();
+    return new Promise((ok, mal) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js";
+      s.onload = ok; s.onerror = () => mal(new Error("No se pudo cargar el lector de códigos."));
+      document.head.appendChild(s);
+    });
+  }
+  async function detenerLector() {
+    if (lectorActivo) { try { await lectorActivo.stop(); } catch (_) { /* ya detenido */ } lectorActivo = null; }
+  }
+  async function hojaEscanear(agregar) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Escanear código</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub" id="es-estado">Abriendo la cámara…</p>
+      <div id="es-lector" class="lector"></div>
+      <div class="acciones-juntos" style="margin-top:12px">
+        <label class="secundario boton-archivo"><input type="file" accept="image/*" id="es-foto">📷 Foto del código</label>
+        <button type="button" class="secundario" style="margin:0" id="es-manual">Escribir número</button>
+      </div>`);
+    const formatos = () => [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E];
+    const encontrado = async (codigo) => {
+      await detenerLector();
+      $("es-estado").textContent = `Código ${codigo}: buscando…`;
+      try {
+        const { producto } = await llamarCoach({ accion: "codigo", codigo });
+        if (producto) return hojaCantidad(producto, agregar);
+        $("es-estado").textContent = `No encontramos el código ${codigo}. Escribe los valores de la etiqueta y quedará guardado para la próxima vez.`;
+        hojaManual(agregar, codigo);
+      } catch (err) { avisar(errorLegible(err)); }
+    };
+    try {
+      await cargarLibreriaLector();
+      lectorActivo = new Html5Qrcode("es-lector", { formatsToSupport: formatos(), verbose: false });
+      await lectorActivo.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 130 }, aspectRatio: 1.6 }, (txt) => encontrado(txt));
+      $("es-estado").textContent = "Apunta al código de barras del producto.";
+    } catch (err) {
+      lectorActivo = null;
+      $("es-estado").textContent = "No se pudo usar la cámara en vivo. Toma una foto del código o escribe el número.";
+    }
+    $("es-foto").addEventListener("change", async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      try {
+        await cargarLibreriaLector(); await detenerLector();
+        const lector = new Html5Qrcode("es-lector", { formatsToSupport: formatos(), verbose: false });
+        encontrado(await lector.scanFile(file, false));
+      } catch (_) { $("es-estado").textContent = "No pude leer el código en la foto. Acércate más o escribe el número."; }
+    });
+    $("es-manual").addEventListener("click", () => {
+      const c = prompt("Número del código de barras:");
+      if (c && c.replace(/\D/g, "").length >= 8) encontrado(c.replace(/\D/g, ""));
+    });
+  }
+  $("hoja").addEventListener("click", (e) => { if (e.target === $("hoja") || e.target.closest("[data-cerrar-hoja]")) detenerLector(); });
+
+  // IA: estimar desde la foto o desde una descripción
+  const aBase64 = (blob) => new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.readAsDataURL(blob); });
+  async function estimarFoto(foto, agregarVarios, boton) {
+    if (!foto) return avisar("Primero toma o elige la foto de la comida.");
+    boton.disabled = true; const t = boton.textContent; boton.textContent = "🤖 Analizando…";
+    try {
+      const imagen = await aBase64(await comprimir(foto, 768, 0.7));
+      const { items } = await llamarCoach({ accion: "foto", imagen });
+      if (!items?.length) return avisar("No identifiqué alimentos en la foto. Añádelos de otra forma.");
+      agregarVarios(items.map((i) => ({ ...i, fuente: "ia", cantidad: i.gramos || 1, unidad: i.gramos ? "g" : null })));
+      avisar("Alimentos estimados: revisa las cantidades antes de guardar.", "ok");
+    } catch (err) { avisar(errorLegible(err)); }
+    finally { boton.disabled = false; boton.textContent = t; }
+  }
+  function hojaDescribir(agregarVarios) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Describir lo que comí</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Ej.: "2 huevos revueltos, una tostada integral con aguacate y un café con leche".</p>
+      <textarea id="ds-texto" maxlength="600"></textarea>
+      <button type="button" class="boton-principal" id="ds-ok" style="margin-top:12px">🤖 Calcular</button>`);
+    $("ds-ok").addEventListener("click", async (e) => {
+      const texto = $("ds-texto").value.trim(); if (!texto) return avisar("Describe lo que comiste.");
+      e.target.disabled = true; e.target.textContent = "🤖 Calculando…";
+      try {
+        const { items } = await llamarCoach({ accion: "texto", texto });
+        if (!items?.length) { e.target.disabled = false; e.target.textContent = "🤖 Calcular"; return avisar("No pude identificar alimentos. Prueba a describirlo distinto."); }
+        agregarVarios(items.map((i) => ({ ...i, fuente: "ia", cantidad: i.gramos || 1, unidad: i.gramos ? "g" : null })));
+        cerrarHoja(); avisar("Alimentos estimados: revisa las cantidades antes de guardar.", "ok");
+      } catch (err) { e.target.disabled = false; e.target.textContent = "🤖 Calcular"; avisar(errorLegible(err)); }
+    });
+  }
+
+  // Coach: comentario de una comida recién guardada y "qué como ahora"
+  async function comentarComida(comidaId, fecha) {
+    if (!perfil.coach_activo) return;
+    try {
+      const { texto } = await llamarCoach({ accion: "comentario", comida_id: comidaId, fecha });
+      if (texto && vistaActual === "comida" && $("hoja").hidden)
+        abrirHoja(`<div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">🤖 Coach</h2><button type="button" data-cerrar-hoja>Cerrar</button></div><p class="coach-texto">${esc(texto)}</p>`);
+    } catch (_) { /* el comentario es opcional */ }
+  }
+  async function hojaQueComer() {
+    abrirHoja(`<div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">🤖 ¿Qué como ahora?</h2><button type="button" data-cerrar-hoja>Cerrar</button></div><p class="sub" id="qc">Pensando en tus metas de hoy…</p>`);
+    try {
+      const ahora = new Date();
+      const { texto } = await llamarCoach({ accion: "que_comer", hora: ahora.toTimeString().slice(0, 5) });
+      if ($("qc")) { $("qc").className = "coach-texto"; $("qc").textContent = texto; }
+    } catch (err) { if ($("qc")) $("qc").textContent = errorLegible(err); }
+  }
+
+  // Chat con el coach
+  async function vistaCoach() {
+    vistaActual = "coach";
+    document.querySelectorAll("#pestanas button").forEach((b) => { if (b.dataset.vista === "mas") b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">🤖 Coach</h2><button type="button" data-ir="mas">Volver</button></div>
+      <p class="sub" id="co-uso">Orientación personalizada para tu objetivo. No es consejo médico.</p>
+      ${perfil.coach_activo ? "" : `<p class="aviso">El coach está apagado. Actívalo en Más → Perfil.</p>`}
+      <div id="co-chat" class="chat"><p class="vacio">Cargando…</p></div>
+      <div class="chips rapidos">${["¿Qué entrenamiento me ayuda más con mi objetivo?", "¿Cómo llego a mi proteína de hoy?", "Dame ideas de snacks saludables", "¿Ya puedo subir de nivel?"]
+        .map((t) => `<button type="button" data-co-rapido="${esc(t)}">${t}</button>`).join("")}</div>
+      <div class="escribir">
+        <textarea id="co-texto" maxlength="1000" rows="1" placeholder="Pregúntale al coach…"></textarea>
+        <button type="button" id="co-enviar" aria-label="Enviar">➤</button>
+      </div>`;
+    const pintar = async () => {
+      const [{ data }, uso] = await Promise.all([
+        db.from("coach_mensajes").select("*").eq("user_id", usuario.id).order("creado_en", { ascending: false }).limit(40),
+        db.rpc("uso_ia_mes")]);
+      if (!$("co-chat")) return;
+      $("co-chat").innerHTML = (data || []).length ? [...data].reverse().map((m) =>
+        `<div class="msg ${m.rol === "user" ? "mio " + (perfil.tema || "rosa") : "suyo coach"}"><span>${esc(m.texto)}</span></div>`).join("")
+        : `<p class="vacio">Pregúntale lo que quieras sobre tus entrenamientos, tu alimentación o tus metas.</p>`;
+      if (uso.data != null) $("co-uso").textContent = `Orientación personalizada para tu objetivo. No es consejo médico. Uso de IA este mes: USD ${Number(uso.data).toFixed(2)} de 1.00.`;
+      window.scrollTo(0, document.body.scrollHeight);
+    };
+    const enviar = async (texto) => {
+      texto = (texto || "").trim(); if (!texto) return;
+      $("co-texto").value = "";
+      $("co-chat").insertAdjacentHTML("beforeend", `<div class="msg mio ${perfil.tema || "rosa"}"><span>${esc(texto)}</span></div><div class="msg suyo coach" id="co-pensando"><span>Pensando…</span></div>`);
+      window.scrollTo(0, document.body.scrollHeight);
+      try { await llamarCoach({ accion: "chat", texto }); } catch (err) { avisar(errorLegible(err)); }
+      pintar();
+    };
+    $("co-enviar").addEventListener("click", () => enviar($("co-texto").value));
+    $("vista").querySelectorAll("[data-co-rapido]").forEach((b) => b.addEventListener("click", () => enviar(b.dataset.coRapido)));
+    pintar();
+  }
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
