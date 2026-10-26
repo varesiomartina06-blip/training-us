@@ -3017,7 +3017,7 @@
       </div>`;
     const pintar = async () => {
       const [{ data }, uso] = await Promise.all([
-        db.from("coach_mensajes").select("*").eq("user_id", usuario.id).order("creado_en", { ascending: false }).limit(40),
+        db.from("coach_mensajes").select("*").eq("user_id", usuario.id).neq("texto", "").order("id", { ascending: false }).limit(40),
         db.rpc("uso_ia_mes")]);
       if (!$("co-chat")) return;
       $("co-chat").innerHTML = (data || []).length ? [...data].reverse().map((m) =>
