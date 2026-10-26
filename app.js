@@ -2460,7 +2460,8 @@
           <button type="button" class="secundario" data-cf-add="catalogo">📚 Mis alimentos</button>
           <button type="button" class="secundario" data-cf-add="manual">✏️ Escribir valores</button>
           ${perfil.coach_activo ? `<button type="button" class="secundario" data-cf-add="foto">🤖 Desde la foto</button>
-          <button type="button" class="secundario" data-cf-add="describir">🤖 Describir</button>` : ""}
+          <button type="button" class="secundario" data-cf-add="describir">🤖 Describir</button>
+          <button type="button" class="secundario" data-cf-add="etiqueta">📄 Leer etiqueta</button>` : ""}
         </div>
         <p class="ayuda" id="cf-total"></p>
         ${perfil.coach_activo ? `<p class="ayuda">Lo estimado por IA es aproximado: revisa las cantidades.</p>` : ""}
@@ -2517,6 +2518,7 @@
       if (a === "catalogo") return hojaCatalogo(agregar);
       if (a === "foto") return estimarFoto(f.foto, agregarVarios, b);
       if (a === "describir") return hojaDescribir(agregarVarios);
+      if (a === "etiqueta") return hojaEtiqueta(agregar);
       return hojaManual(agregar);
     }));
 
@@ -2622,12 +2624,21 @@
           <span><strong>${esc(a.nombre)}</strong><span class="meta">${esc(a.porcion)} · ${Math.round(a.kcal)} kcal · P ${r1(a.proteina)} g</span></span>
           <span style="display:grid;gap:6px"><input type="number" inputmode="decimal" min="0.25" step="0.25" value="1" data-ct-cant="${a.id}" aria-label="Porciones" style="height:38px;padding:0 8px;text-align:center">
             <button type="button" data-ct-add="${a.id}" style="min-height:36px;font-size:.88rem">Añadir</button>
-            ${a.gramos ? `<button type="button" class="enlace" data-ct-gramos="${a.id}" style="min-height:28px;font-size:.8rem;padding:0">En gramos</button>` : ""}</span>
+            ${a.gramos ? `<button type="button" class="enlace" data-ct-gramos="${a.id}" style="min-height:28px;font-size:.8rem;padding:0">En gramos</button>` : ""}
+            <button type="button" class="enlace" data-ct-borrar="${a.id}" style="min-height:28px;font-size:.8rem;padding:0;color:var(--error)">Borrar</button></span>
         </div>`).join("") || `<p class="vacio">Sin resultados.</p>`;
     };
     pintar();
     $("ct-buscar").addEventListener("input", (e) => pintar(e.target.value));
     $("ct-lista").addEventListener("click", async (e) => {
+      const del = e.target.closest("[data-ct-borrar]");
+      if (del) {
+        const a = lista.find((x) => x.id === Number(del.dataset.ctBorrar));
+        if (!confirm(`¿Borrar "${a.nombre}" de tus alimentos? Las comidas ya registradas no cambian.`)) return;
+        const r = await db.from("alimentos").delete().eq("id", a.id);
+        if (r.error) return avisar(errorLegible(r.error));
+        lista.splice(lista.indexOf(a), 1); pintar($("ct-buscar").value); return;
+      }
       const g = e.target.closest("[data-ct-gramos]");
       if (g) {
         const a = lista.find((x) => x.id === Number(g.dataset.ctGramos));
@@ -2775,6 +2786,11 @@
       <p class="kcal" id="cq-prev"></p>
       ${al.fuente !== "catalogo" ? `<label class="interruptor" style="margin-top:12px"><span>Guardar en mis alimentos</span><input id="cq-guardar" type="checkbox" checked></label>` : ""}
       <button type="button" class="boton-principal" id="cq-ok" style="margin-top:14px">Añadir</button>`);
+    const vacio = !al.por100?.kcal && !al.por100?.proteina && !al.por100?.carbohidratos && !al.por100?.grasas;
+    if (vacio) {
+      $("cq-ok").insertAdjacentHTML("beforebegin", `<p class="aviso">Este alimento no tiene datos nutricionales. Mejor lee la etiqueta o escribe los valores.</p>`);
+      if ($("cq-guardar")) $("cq-guardar").checked = false;
+    }
     const gramos = () => { const v = Number($("cq-valor").value || 0); return modo === "gramos" ? v : v * porcionG; };
     const prev = () => { $("cq-prev").textContent = `${r1(gramos())} g → ${resumenNutr(escalar(al.por100, gramos()))}`; };
     prev();
@@ -2793,7 +2809,7 @@
       if ($("cq-guardar")?.checked) {
         const r = await db.from("alimentos").upsert({
           user_id: usuario.id, nombre: al.nombre.slice(0, 120), porcion: porcionG ? al.porcion.desc.slice(0, 40) : "100 g",
-          gramos: porcionG || 100, fuente: al.fuente, codigo_barras: al.fuente === "off" ? al.id : null,
+          gramos: porcionG || 100, fuente: al.fuente, codigo_barras: al.codigo || (al.fuente === "off" ? al.id : null),
           ...(porcionG ? escalar(al.por100, porcionG) : escalar(al.por100, 100))
         }, { onConflict: "user_id,nombre,porcion" }).select("id").single();
         if (!r.error && r.data) alimento_id = r.data.id;
@@ -2816,19 +2832,25 @@
         <input id="bs-q" type="search" placeholder="Ej.: pechuga de pollo, avena…" enterkeyhint="search">
         <button type="button" id="bs-ir" style="width:auto">Buscar</button>
       </div>
-      <p class="ayuda">Productos de marca (Open Food Facts) y alimentos genéricos (USDA). Valores por 100 g.</p>
+      <p class="ayuda">Para alimentos sin marca (pollo, arroz, avena, fruta) usa los genéricos; para productos empaquetados, mejor escanea el código.</p>
       <div class="lista" id="bs-res" style="margin-top:12px"></div>`);
     let resultados = [];
+    const fila = (a, i) => `
+          <button type="button" class="item" data-bs="${i}" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
+            <span><strong>${esc(a.nombre)}</strong><span class="meta">${a.marca ? esc(a.marca) + " · " : ""}${Math.round(a.por100.kcal)} kcal · P ${r1(a.por100.proteina)} · C ${r1(a.por100.carbohidratos)} · G ${r1(a.por100.grasas)} <small>(100 g)</small></span></span>
+            <span class="lado">›</span></button>`;
     const buscar = async () => {
       const q = $("bs-q").value.trim(); if (!q) return;
       $("bs-res").innerHTML = `<p class="vacio">Buscando…</p>`;
       try {
         const d = await llamarCoach({ accion: "buscar", consulta: q });
-        resultados = d.resultados || [];
-        $("bs-res").innerHTML = resultados.length ? resultados.map((a, i) => `
-          <button type="button" class="item" data-bs="${i}" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
-            <span><strong>${esc(a.nombre)}</strong><span class="meta">${a.marca ? esc(a.marca) + " · " : ""}${FUENTE[a.fuente]} · ${Math.round(a.por100.kcal)} kcal/100 g · P ${r1(a.por100.proteina)} g</span></span>
-            <span class="lado">›</span></button>`).join("") : `<p class="vacio">Sin resultados. Prueba con otras palabras o escribe los valores a mano.</p>`;
+        const gen = d.genericos || [], mar = d.marcas || [];
+        resultados = [...gen, ...mar];
+        let html = (d.avisos || []).map((a) => `<p class="aviso">${esc(a)}</p>`).join("");
+        if (gen.length) html += `<span class="grupo-titulo" style="margin-top:6px">🥦 Alimentos genéricos (USDA)</span>` + gen.map((a, i) => fila(a, i)).join("");
+        if (mar.length) html += `<span class="grupo-titulo" style="margin-top:14px">🏷️ Productos de marca (Open Food Facts)</span>` + mar.map((a, i) => fila(a, gen.length + i)).join("");
+        if (!resultados.length) html += `<p class="vacio">Sin resultados. Prueba con otras palabras, escanea el código o lee la etiqueta.</p>`;
+        $("bs-res").innerHTML = html;
       } catch (err) { $("bs-res").innerHTML = ""; avisar(errorLegible(err)); }
     };
     $("bs-ir").addEventListener("click", buscar);
@@ -2866,7 +2888,8 @@
       $("es-estado").textContent = `Código ${codigo}: buscando…`;
       try {
         const { producto } = await llamarCoach({ accion: "codigo", codigo });
-        if (producto) return hojaCantidad(producto, agregar);
+        if (producto && !producto.incompleto) return hojaCantidad(producto, agregar);
+        if (producto?.incompleto) return hojaSinDatos(producto.nombre, codigo, agregar);
         $("es-estado").textContent = `No encontramos el código ${codigo}. Escribe los valores de la etiqueta y quedará guardado para la próxima vez.`;
         hojaManual(agregar, codigo);
       } catch (err) { avisar(errorLegible(err)); }
@@ -2894,6 +2917,38 @@
     });
   }
   $("hoja").addEventListener("click", (e) => { if (e.target === $("hoja") || e.target.closest("[data-cerrar-hoja]")) detenerLector(); });
+
+  function hojaSinDatos(nombre, codigo, agregar) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">${esc(nombre || "Producto")}</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="aviso">Encontré el producto (código ${esc(codigo)}), pero su ficha en Open Food Facts no tiene información nutricional. Lee la etiqueta una vez y quedará guardado con su código para la próxima.</p>
+      <div class="botones-lista" style="margin-top:14px">
+        ${perfil.coach_activo ? `<button type="button" class="boton-principal" id="sd-etiqueta">📄 Leer la etiqueta con IA</button>` : ""}
+        <button type="button" class="secundario" id="sd-manual">✏️ Escribir los valores</button>
+      </div>`);
+    $("sd-etiqueta")?.addEventListener("click", () => hojaEtiqueta(agregar, { nombre, codigo }));
+    $("sd-manual").addEventListener("click", () => hojaManual(agregar, codigo));
+  }
+
+  function hojaEtiqueta(agregar, base = {}) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">📄 Leer etiqueta</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Toma una foto de la tabla de <strong>Información nutricional</strong>, de frente, cerca y bien iluminada.</p>
+      ${!base.nombre ? `<div class="campo"><label for="et-nombre">Nombre del producto</label><input id="et-nombre" maxlength="120" placeholder="Ej.: Galletas Club Social"></div>` : ""}
+      <label class="boton-archivo secundario" style="margin-top:6px"><input type="file" accept="image/*" id="et-foto">📷 Tomar foto de la etiqueta</label>
+      <p class="sub" id="et-estado" style="margin-top:12px"></p>`);
+    $("et-foto").addEventListener("change", async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      $("et-estado").textContent = "🤖 Leyendo la etiqueta…";
+      try {
+        const imagen = await aBase64(await comprimir(file, 1280, 0.8));
+        const nombre = base.nombre || $("et-nombre")?.value.trim() || null;
+        const { producto } = await llamarCoach({ accion: "etiqueta", imagen, nombre });
+        hojaCantidad({ ...producto, fuente: "ia", codigo: base.codigo || null }, agregar);
+        avisar("Etiqueta leída: revisa que los valores coincidan.", "ok");
+      } catch (err) { $("et-estado").textContent = errorLegible(err); }
+    });
+  }
 
   // IA: estimar desde la foto o desde una descripción
   const aBase64 = (blob) => new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.readAsDataURL(blob); });
