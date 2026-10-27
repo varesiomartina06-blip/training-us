@@ -419,3 +419,18 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .comparar figure { margin: 0; }
 .comparar img { width: 100%; border-radius: 12px; aspect-ratio: 3/4; object-fit: cover; }
 .comparar figcaption { text-align: center; font-size: .82rem; color: var(--texto-suave); margin-top: 4px; }
+
+/* ===================== Bienestar y comidas preparadas ===================== */
+.tarjeta.bienestar { border-color: #F2D48A; box-shadow: inset 5px 0 0 #F2D48A; padding-left: 22px; }
+.lista-bienestar { display: grid; gap: 8px; margin: 14px 0 8px; }
+.habito { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 10px; align-items: center; background: var(--fondo); border-radius: 14px; padding: 10px 12px; }
+.habito.ok { background: #E3EFE3; }
+.habito.alerta { background: #FFF4D9; }
+.habito-emoji { font-size: 1.4rem; text-align: center; }
+.habito strong { display: block; font-size: .95rem; }
+.habito .meta { color: var(--texto-suave); font-size: .82rem; }
+.niveles { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 6px; }
+.niveles button { min-height: 76px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: var(--campo); color: var(--texto); border: 1px solid var(--borde); font-size: .72rem; border-radius: 14px; }
+.niveles button span { font-size: 1.7rem; }
+.niveles button[aria-pressed="true"] { border-color: var(--acento); background: var(--acento-suave); }
+.item.preparada { border-style: dashed; }

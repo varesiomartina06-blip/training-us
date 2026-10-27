@@ -1814,7 +1814,7 @@
     ["animo", "💗 Ánimo de tu pareja después de entrenar"], ["juntos", "💞 Confirmaciones de \"juntos\""],
     ["entreno_previsto", "🏋️‍♀️ Entrenamiento previsto (8:00)"], ["meta_pendiente", "⏳ Meta pendiente (domingo 17:00)"],
     ["multas", "💰 Multas y pagos"], ["sueno", "😴 Recordatorios de sueño"], ["lesion", "🩹 Seguimiento de lesiones"],
-    ["logros", "✨ Logros y rachas"], ["ciclo", "🌸 Inicio del periodo de tu pareja"], ["peso", "⚖️ Recordatorio semanal de peso"], ["resumen", "📊 Resumen semanal (lunes)"], ["zona", "🛬 Cambios de zona horaria"]
+    ["bienestar", "💛 Bienestar: check-in y hábitos de cuidado"], ["logros", "✨ Logros y rachas"], ["ciclo", "🌸 Inicio del periodo de tu pareja"], ["peso", "⚖️ Recordatorio semanal de peso"], ["resumen", "📊 Resumen semanal (lunes)"], ["zona", "🛬 Cambios de zona horaria"]
   ];
   const instalada = () => window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
   const aUint8 = (b64) => {
@@ -2304,6 +2304,16 @@
 
   function itemComida(c, urls, kcal) {
     const cat = CAT[c.categoria];
+    if (c.estado === "preparada") {
+      const fotoP = fotoVigente(c) ? urls[c.foto_ruta] : null;
+      return `
+      <div class="item preparada" style="grid-template-columns:56px minmax(0,1fr)">
+        <span class="mini" ${fotoP ? `style="background-image:url('${fotoP}')"` : ""}>${fotoP ? "" : "📦"}</span>
+        <span><strong>📦 ${esc(c.nombre)}</strong><span class="meta">${cat.nombre} preparada${kcal != null ? ` · 🔒 ${Math.round(kcal)} kcal` : ""}</span>
+          ${c.fecha <= yo().hoy ? `<span class="acciones-fila"><button type="button" data-prep-si="${c.id}">✓ Me la comí</button><button type="button" data-prep-no="${c.id}">No me la comí</button></span>`
+            : `<span class="etiqueta">Para mañana</span>`}</span>
+      </div>`;
+    }
     if (c.saltada) return `
       <button type="button" class="item" data-comida="${c.id}" style="min-height:56px">
         <span class="mini">⏭️</span><span><strong>${cat.nombre} saltado</strong><span class="meta">${c.hora ? c.hora.slice(0, 5) : ""}</span></span><span></span>
@@ -2394,6 +2404,10 @@
       <div class="lista">${d.comidas.length ? d.comidas.map((c) => itemComida(c, urls, esMio ? d.kcal_por_comida?.[c.id] : null)).join("")
         : `<p class="vacio">${esMio ? "Aún no registraste comidas este día." : "Sin comidas registradas este día."}</p>`}</div>`;
     if (esMio) cargarComidasPendientes();
+    if (esMio && esHoy) {
+      const { data: man } = await db.from("comidas").select("id, nombre, categoria").eq("user_id", usuario.id).eq("estado", "preparada").eq("fecha", sumarDias(y.hoy, 1));
+      if (man?.length) $("comida-contenido").insertAdjacentHTML("beforeend", `<p class="ayuda" style="margin-top:14px">📦 Preparadas para mañana: ${man.map((c) => `${CAT[c.categoria].emoji} ${esc(c.nombre)}`).join(", ")}.</p>`);
+    }
   }
 
   async function cargarComidasPendientes() {
@@ -2483,6 +2497,8 @@
         <div id="cf-foto"><label class="agregar-foto" style="aspect-ratio:auto;padding:22px"><input type="file" accept="image/*" id="cf-archivo">📷 Tomar o elegir foto</label></div>
       </section>
       <section class="tarjeta">
+        ${!editId && fecha === y.hoy ? `<label class="interruptor" style="margin-bottom:12px"><span>📦 La preparé para mañana</span><input id="cf-preparada" type="checkbox"></label>
+        <p class="ayuda" style="margin:-4px 0 14px">Regístrala ahora, cuando la pesas y empacas. Mañana solo confirmas que te la comiste.</p>` : ""}
         <label class="interruptor"><span>🍕 Es mi comida libre</span><input id="cf-libre" type="checkbox" ${f.libre ? "checked" : ""} ${libreDisponible ? "" : "disabled"}></label>
         <p class="ayuda">${lib.usada_hoy && !f.libre ? "Ya usaste la comida libre de hoy." : !libreDisponible ? "No te quedan comidas libres este mes." :
           `Quedan ${lib.quedan} de ${lib.total} este mes${lib.recompensa ? " · 🎁 +1 de recompensa" : ""}${lib.regalo_juntos ? " · 💞 hoy hay una de regalo si comen juntos" : ""}. Máximo una por día.`}</p>
@@ -2584,7 +2600,9 @@
       let id = editId, creada = false;
       try {
         if (!editId) {
-          const r = await db.from("comidas").insert({ ...campos, user_id: usuario.id, fecha, juntos: $("cf-juntos").checked ? "pendiente" : "no" }).select("id").single();
+          const preparada = $("cf-preparada")?.checked;
+          const r = await db.from("comidas").insert({ ...campos, user_id: usuario.id, fecha: preparada ? sumarDias(fecha, 1) : fecha,
+            juntos: $("cf-juntos").checked ? "pendiente" : "no" }).select("id").single();
           if (r.error) throw r.error;
           id = r.data.id; creada = true;
         } else {
@@ -2598,7 +2616,9 @@
           const ruta = `${usuario.id}/${id}-${Date.now()}.jpg`;
           const up = await db.storage.from("comidas").upload(ruta, await comprimir(f.foto, 1024, 0.65), { contentType: "image/jpeg" });
           if (up.error) throw up.error;
-          const r = await db.from("comidas").update({ foto_ruta: ruta, foto_hasta: new Date(Date.now() + 24 * 3600 * 1000).toISOString(), foto_borrada: false, estado: "completa" }).eq("id", id);
+          const esPrep = $("cf-preparada")?.checked || base?.estado === "preparada";
+          const r = await db.from("comidas").update({ foto_ruta: ruta, foto_borrada: false,
+            foto_hasta: new Date(Date.now() + (esPrep ? 60 : 24) * 3600 * 1000).toISOString(), estado: esPrep ? "preparada" : "completa" }).eq("id", id);
           if (r.error) throw r.error;
         }
         if (editId) await db.from("comida_items").delete().eq("comida_id", id);
@@ -2609,9 +2629,10 @@
             ...Object.fromEntries(NKEYS.map((n) => [n, Number(i[n]) || 0])) })));
           if (r.error) throw r.error;
         }
-        avisar(editId ? "Comida actualizada." : "Comida guardada. 🍽️", "ok");
+        const fuePrep = $("cf-preparada")?.checked;
+        avisar(fuePrep ? "Guardada para mañana. 📦 Mañana confirma que te la comiste." : editId ? "Comida actualizada." : "Comida guardada. 🍽️", "ok");
         irA("comida");
-        comentarComida(id, fecha);
+        if (!fuePrep) comentarComida(id, fecha);
       } catch (err) {
         if (creada) await db.from("comidas").delete().eq("id", id);
         boton.disabled = false; boton.textContent = editId ? "Guardar cambios" : "Guardar comida";
@@ -2743,12 +2764,14 @@
   async function hojaCerrarDia() {
     const { data: d } = await db.rpc("resumen_dia_comida", { p_user: usuario.id, p_fecha: comidaFecha });
     const comidas = (d?.comidas || []).filter((c) => c.estado === "completa");
+    const sinConfirmar = (d?.comidas || []).filter((c) => c.estado === "preparada");
     const mensaje = d?.comidas_min
       ? `¿Seguro que estas fueron todas tus comidas de hoy, y cada una tiene su foto? Registrar comidas que no hiciste suma puntos falsos y le quita sentido al desafío. Juega limpio. 💙`
       : `¿Seguro que estas fueron todas tus comidas de hoy? training.us funciona porque los dos confían en lo que registran. Omitir una comida para cuidar tus puntos rompe esa confianza y le quita sentido al desafío. 💗`;
     abrirHoja(`
       <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Cerrar mi día</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
       <div class="lista" style="margin-bottom:14px">${comidas.length ? comidas.map((c) => `<p class="ayuda" style="margin:0">${CAT[c.categoria].emoji} ${c.saltada ? CAT[c.categoria].nombre + " saltado" : esc(c.nombre)}</p>`).join("") : `<p class="aviso">No registraste comidas hoy: el día contará como 0 %.</p>`}</div>
+      ${sinConfirmar.length ? `<p class="aviso">📦 Tienes ${sinConfirmar.length} comida(s) preparada(s) sin confirmar: confírmala(s) o elimínala(s) antes de cerrar.</p>` : ""}
       <p class="aviso">${mensaje}</p>
       <button type="button" class="boton-principal" id="cd-ok" style="margin-top:14px">Sí, son todas</button>
       <button type="button" class="secundario" data-cerrar-hoja>Todavía me falta registrar algo</button>`);
@@ -2798,6 +2821,21 @@
       if (r.error) return avisar(errorLegible(r.error));
       if (c?.foto_ruta) db.storage.from("comidas").remove([c.foto_ruta]);
       cerrarHoja(); avisar("Comida eliminada.", "ok"); return vistaComida();
+    }
+    const ps = t.closest("[data-prep-si]");
+    if (ps) {
+      const id = Number(ps.dataset.prepSi);
+      const r = await db.from("comidas").update({ estado: "completa", hora: ahoraHHMM(), foto_hasta: new Date(Date.now() + 24 * 3600 * 1000).toISOString() }).eq("id", id);
+      if (r.error) return avisar(errorLegible(r.error));
+      avisar("¡Confirmada! 🍽️", "ok"); vistaComida(); comentarComida(id, comidaFecha); return;
+    }
+    const pn = t.closest("[data-prep-no]");
+    if (pn) {
+      if (!confirm("¿Eliminar esta comida preparada? No contará en tu día.")) return;
+      const { data: c } = await db.from("comidas").select("foto_ruta").eq("id", Number(pn.dataset.prepNo)).single();
+      await db.from("comidas").delete().eq("id", Number(pn.dataset.prepNo));
+      if (c?.foto_ruta) db.storage.from("comidas").remove([c.foto_ruta]);
+      return vistaComida();
     }
     const ag = t.closest("[data-agua]");
     if (ag) {
@@ -3086,6 +3124,8 @@
       rapidos: ["¿Qué entrenamiento me ayuda más con mi objetivo?", "¿Cómo llego a mi proteína de hoy?", "Dame ideas de snacks saludables", "¿Ya puedo subir de nivel?"] },
     episodio: { titulo: "📓 Coach · registro personal", volver: "habitos", sub: "Un espacio sin juicios para entender tus episodios y encontrar estrategias. No sustituye a un profesional.",
       rapidos: ["Quiero contarte lo que pasó", "¿Ves algún patrón en mis registros?", "¿Qué puedo hacer cuando siento que va a pasar?", "¿Cómo organizo mis comidas para que no me pase?"] },
+    bienestar: { titulo: "💛 Coach · bienestar", volver: "habitos", sub: "Acompañamiento para tus hábitos de cuidado. No sustituye a tu profesional de salud mental.",
+      rapidos: ["Hoy me cuesta empezar el día", "¿Qué hábito pequeño hago ahora?", "Me siento sin energía", "Ayúdame a planear un día tranquilo"] },
     lesion: { titulo: "🩹 Coach · lesiones y dolores", volver: "habitos", sub: "Cuidados, ajustes y ejercicios alternativos. No diagnostica: ante señales de alarma, consulta a un profesional.",
       rapidos: ["Me duele al entrenar, te cuento", "¿Qué ejercicios puedo hacer sin cargar la zona?", "¿Cómo vuelvo a entrenar después de una lesión?", "¿Cómo caliento para evitar dolores?"] }
   };
@@ -3531,7 +3571,10 @@
     const borradores = esMio ? (await db.from("entrenos").select("id").eq("user_id", usuario.id).eq("origen", "salud").eq("estado", "borrador")).data || [] : [];
     const muestraCiclo = (esMio ? perfil.sexo === "femenino" : false) || (cic.data || []).length > 0;
 
+    const htmlBienestar = esMio ? await tarjetaBienestar() : "";
+    if (vistaActual !== "habitos") return;
     $("hab").innerHTML = `
+      ${htmlBienestar}
       <section class="tarjeta">
         <div class="nutri-cab"><h3 style="margin:0">😴 Sueño</h3>${esMio ? `<button type="button" class="enlace" data-hab="sueno" style="width:auto;min-height:0;padding:0">+ Registrar</button>` : ""}</div>
         ${ev ? `<p>Anoche: <strong>${hhmm(ev.dormir)} → ${hhmm(ev.despertar)}</strong> · ${r1(ev.horas)} h ${ev.neutral ? "· 🎉 salida nocturna (neutral)" : ""}</p>
@@ -3608,6 +3651,135 @@
     return `<details class="historial"><summary>Patrones de los últimos 60 días</summary>${fila("Horario", franjas)}${fila("Emociones", emo)}${fila("Situaciones", sit)}
       <p class="ayuda">Son coincidencias en tus registros, no causas. Si quieres, coméntalas con el coach o con un profesional.</p></details>`;
   }
+
+  // ---------- Bienestar: hábitos de cuidado y check-in de ánimo
+  const NIVELES = [[1, "😞", "Muy mal"], [2, "😕", "Mal"], [3, "😐", "Regular"], [4, "🙂", "Bien"], [5, "😊", "Muy bien"]];
+  const EMOCIONES_ANIMO = ["Tristeza", "Ansiedad", "Cansancio", "Apatía", "Soledad", "Irritabilidad", "Calma", "Motivación", "Alegría", "Gratitud"];
+  const AYUDA_CRISIS = `Si sientes que no puedes con esto, o aparecen pensamientos de hacerte daño, busca ayuda ahora: tu psicóloga/o o psiquiatra, una persona de confianza, o emergencias (911 en Panamá · 112 en España · 024 en España).`;
+
+  async function tarjetaBienestar() {
+    let { data: est, error } = await db.rpc("estado_bienestar");
+    if (error) return `<section class="tarjeta"><p class="ayuda">Para activar el plan de bienestar, ejecuta fase10-ampliacion.sql.</p></section>`;
+    if (!est?.habitos?.length) return `
+      <section class="tarjeta bienestar">
+        <h3>💛 Bienestar</h3>
+        <p>Un plan con tus hábitos de cuidado (dormir a tiempo, salir de casa, bañarte, vestirte, moverte, comer algo que te haga bien) y un check-in diario de ánimo. Si pasa más de un día sin uno de ellos, la app te lo recuerda con cariño.</p>
+        <button type="button" class="boton-principal" data-bien="crear" style="margin-top:12px">Crear mi plan de bienestar</button>
+        <p class="ayuda">Es privado: solo tú lo ves. Complementa, no sustituye, el acompañamiento profesional.</p>
+      </section>`;
+    const a = est.animo;
+    const nivel = a ? NIVELES.find((n) => n[0] === a.nivel) : null;
+    return `
+      <section class="tarjeta bienestar">
+        <div class="nutri-cab"><h3 style="margin:0">💛 Bienestar</h3><button type="button" class="enlace" data-bien="config" style="width:auto;min-height:0;padding:0">Editar plan</button></div>
+        ${a ? `<p>Hoy: <strong>${nivel[1]} ${nivel[2]}</strong>${a.emociones?.length ? " · " + a.emociones.join(", ").toLowerCase() : ""} <button type="button" class="enlace" data-bien="animo" style="width:auto;min-height:0;padding:0 4px;display:inline">Cambiar</button></p>`
+          : `<button type="button" class="boton-principal" data-bien="animo" style="margin-top:10px">¿Cómo te sientes hoy?</button>`}
+        ${(est.animo_semana || []).length > 1 ? `<div class="semana-sueno">${est.animo_semana.map((x) => `<span><small>${fmt(x.fecha, { weekday: "narrow" })}</small><strong>${NIVELES[x.nivel - 1][1]}</strong></span>`).join("")}</div>` : ""}
+        <div class="lista-bienestar">${est.habitos.map((h) => `
+          <div class="habito ${h.hoy_ok ? "ok" : h.alerta ? "alerta" : ""}">
+            <span class="habito-emoji">${h.emoji}</span>
+            <span><strong>${esc(h.nombre)}</strong><span class="meta">${h.hoy_ok ? "✓ Cumplido" : h.unidad === "comidas" ? (h.sin ? `${h.sin} comida(s) seguidas sin` : "—") : h.sin > 0 ? `${h.sin} ${h.unidad === "noches" ? "noche(s)" : "día(s)"} sin cumplir` : "Pendiente hoy"}${h.alerta ? " · 💛 toca hoy" : ""}</span></span>
+            ${h.tipo === "manual" ? `<button type="button" class="${h.hoy_ok ? "secundario" : ""}" data-bien-hecho="${esc(h.clave)}" data-v="${!h.hoy_ok}" style="width:auto;min-height:36px;padding:0 12px;font-size:.88rem;margin:0">${h.hoy_ok ? "Hecho ✓" : "Hecho hoy"}</button>`
+              : `<span class="ayuda" style="margin:0;font-size:.75rem">auto</span>`}
+          </div>`).join("")}</div>
+        <p class="ayuda">Los de sueño, ejercicio y comida se actualizan solos con tus registros.</p>
+        <button type="button" class="secundario" data-bien="coach">🤖 Hablar con el coach</button>
+      </section>`;
+  }
+
+  function hojaAnimo() {
+    let nivel = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">💛 ¿Cómo te sientes hoy?</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <div class="niveles" id="an-nivel">${NIVELES.map(([n, e, t]) => `<button type="button" data-n="${n}" aria-pressed="false"><span>${e}</span>${t}</button>`).join("")}</div>
+      <span class="grupo-titulo" style="margin-top:16px">¿Qué sientes? (opcional)</span>${chipsMulti("an-emo", EMOCIONES_ANIMO)}
+      <div class="campo" style="margin-top:14px"><label for="an-nota">Lo que quieras contar (opcional)</label><textarea id="an-nota" maxlength="1000"></textarea></div>
+      <label class="interruptor campo"><span>💗 Avisar a ${esc(pareja()?.nombre || "mi pareja")} que hoy necesito apoyo</span><input id="an-apoyo" type="checkbox"></label>
+      <p class="ayuda" style="margin:-10px 0 14px">Solo le llega el aviso, sin detalles de lo que escribas.</p>
+      <button type="button" class="boton-principal" id="an-ok">Guardar</button>`);
+    activarChips("an-emo");
+    $("an-nivel").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-n]"); if (!b) return;
+      nivel = Number(b.dataset.n); $("an-nivel").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    });
+    $("an-ok").addEventListener("click", async (e) => {
+      if (!nivel) return avisar("Elige cómo te sientes.");
+      e.target.disabled = true;
+      const datos = { user_id: usuario.id, fecha: yo().hoy, nivel, emociones: leerChips("an-emo"), nota: $("an-nota").value.trim() || null, pedir_apoyo: $("an-apoyo").checked };
+      const r = await db.from("animo_diario").upsert(datos, { onConflict: "user_id,fecha" });
+      if (r.error) { e.target.disabled = false; return avisar(errorLegible(r.error)); }
+      abrirHoja(`<div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">💛 Gracias por contarlo</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+        <p class="coach-texto" id="an-respuesta">${perfil.coach_activo ? "🤖 El coach está escribiéndote…" : "Registrado. Revisa tus hábitos de cuidado de hoy, paso a paso."}</p>
+        ${nivel <= 2 ? `<p class="aviso" style="margin-top:14px">${AYUDA_CRISIS}</p>` : ""}`);
+      vistaHabitos();
+      if (perfil.coach_activo) {
+        try { const { texto } = await llamarCoach({ accion: "bienestar", nivel, emociones: datos.emociones, nota: datos.nota }); if ($("an-respuesta") && texto) $("an-respuesta").textContent = texto; }
+        catch (err) { if ($("an-respuesta")) $("an-respuesta").textContent = "Registrado. " + errorLegible(err); }
+      }
+    });
+  }
+
+  async function hojaPlanBienestar() {
+    const { data } = await db.from("habitos_bienestar").select("*").eq("user_id", usuario.id).order("orden").order("id");
+    const lista = data || [];
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">💛 Mi plan de bienestar</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Activa los hábitos que te ayudan y elige cuánto tiempo puede pasar sin cumplirlos antes de que la app te lo recuerde.</p>
+      <div class="lista" id="pb-lista">${lista.map((h) => `
+        <div class="tarjeta" style="margin:0" data-pb="${h.id}">
+          <label class="interruptor"><span>${h.emoji} ${esc(h.nombre)}</span><input type="checkbox" class="pb-activo" ${h.activo ? "checked" : ""}></label>
+          <div class="fila" style="margin-top:10px">
+            <div><label>Recordar después de</label><select class="pb-max">${[1, 2, 3].map((n) => `<option value="${n}" ${h.max_dias_sin === n ? "selected" : ""}>${n} ${h.tipo === "comida" ? "comida(s)" : h.tipo.startsWith("sueno") ? "noche(s)" : "día(s)"}</option>`).join("")}</select></div>
+            ${h.tipo === "sueno_hora" ? `<div><label>Dormir antes de las</label><select class="pb-param">${[21, 22, 23].map((n) => `<option value="${n}" ${Number(h.parametro) === n ? "selected" : ""}>${n}:00</option>`).join("")}</select></div>`
+              : h.tipo === "sueno_horas" ? `<div><label>Horas mínimas</label><select class="pb-param">${[6, 6.5, 7, 7.5, 8].map((n) => `<option value="${n}" ${Number(h.parametro) === n ? "selected" : ""}>${n} h</option>`).join("")}</select></div>` : "<div></div>"}
+          </div>
+          ${h.tipo === "manual" && !["salir_casa", "banarse", "vestirse"].includes(h.clave) ? `<button type="button" class="enlace" data-pb-borrar="${h.id}" style="color:var(--error);text-align:left;padding-left:0">Eliminar</button>` : ""}
+        </div>`).join("")}</div>
+      <section class="tarjeta" style="margin-top:14px"><h3>Añadir un hábito propio</h3>
+        <div class="fila" style="margin-top:10px"><div><label for="pb-emoji">Emoji</label><input id="pb-emoji" maxlength="4" value="✨"></div><div><label for="pb-nombre">Hábito</label><input id="pb-nombre" maxlength="80" placeholder="Ej.: Hablar con una amiga"></div></div>
+        <button type="button" class="secundario" id="pb-anadir">Añadir</button></section>
+      <button type="button" class="boton-principal" id="pb-ok">Guardar plan</button>`);
+    $("pb-anadir").addEventListener("click", async () => {
+      const nombre = $("pb-nombre").value.trim(); if (!nombre) return avisar("Escribe el hábito.");
+      const r = await db.from("habitos_bienestar").insert({ user_id: usuario.id, clave: "propio_" + Date.now(), nombre, emoji: $("pb-emoji").value.trim() || "✨", tipo: "manual", orden: 50 });
+      if (r.error) return avisar(errorLegible(r.error));
+      hojaPlanBienestar();
+    });
+    $("pb-lista").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-pb-borrar]"); if (!b) return;
+      if (!confirm("¿Eliminar este hábito?")) return;
+      await db.from("habitos_bienestar").delete().eq("id", Number(b.dataset.pbBorrar)); hojaPlanBienestar();
+    });
+    $("pb-ok").addEventListener("click", async () => {
+      for (const t of document.querySelectorAll("[data-pb]")) {
+        const cambios = { activo: t.querySelector(".pb-activo").checked, max_dias_sin: Number(t.querySelector(".pb-max").value) };
+        if (t.querySelector(".pb-param")) cambios.parametro = Number(t.querySelector(".pb-param").value);
+        await db.from("habitos_bienestar").update(cambios).eq("id", Number(t.dataset.pb));
+      }
+      cerrarHoja(); avisar("Plan guardado. 💛", "ok"); vistaHabitos();
+    });
+  }
+
+  $("vista").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-bien]");
+    if (b) {
+      const a = b.dataset.bien;
+      if (a === "crear") { const r = await db.rpc("crear_plan_bienestar"); if (r.error) return avisar(errorLegible(r.error)); avisar("Plan creado. Puedes ajustarlo cuando quieras. 💛", "ok"); return vistaHabitos(); }
+      if (a === "animo") return hojaAnimo();
+      if (a === "config") return hojaPlanBienestar();
+      if (a === "coach") return vistaCoach("bienestar");
+    }
+    const h = e.target.closest("[data-bien-hecho]");
+    if (h) {
+      const hecho = h.dataset.v === "true";
+      const r = hecho
+        ? await db.from("bienestar_registros").upsert({ user_id: usuario.id, fecha: yo().hoy, clave: h.dataset.bienHecho, hecho: true }, { onConflict: "user_id,fecha,clave" })
+        : await db.from("bienestar_registros").delete().eq("user_id", usuario.id).eq("fecha", yo().hoy).eq("clave", h.dataset.bienHecho);
+      if (r.error) return avisar(errorLegible(r.error));
+      if (hecho) avisar("¡Bien hecho! 💛", "ok");
+      return vistaHabitos();
+    }
+  });
 
   // ---------- Hojas de registro
   function chipsMulti(id, opciones, sel = []) {
