@@ -169,8 +169,8 @@
     if (v === "receta-editor") v = "recetas";
     if (v === "reporte") v = "exportar";
     vistaActual = v;
-    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil", "coach", "exportar"].includes(v) ? "mas"
-      : ["recetas", "checkin"].includes(v) ? "comida" : v;
+    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil", "coach", "exportar", "metas"].includes(v) ? "mas"
+      : ["recetas", "checkin"].includes(v) ? "comida" : ["salud"].includes(v) ? "habitos" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
       if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
@@ -185,7 +185,9 @@
     else if (v === "multas") vistaMultas();
     else if (v === "comida") vistaComida();
     else if (v === "mas") vistaMas();
-    else if (v === "coach") vistaCoach();
+    else if (v === "coach") vistaCoach("general");
+    else if (v === "habitos") vistaHabitos();
+    else if (v === "salud") vistaSalud();
     else if (v === "recetas") vistaRecetas();
     else if (v === "checkin") vistaCheckin();
     else if (v === "exportar") vistaExportar();
@@ -860,6 +862,7 @@
         <p>${textoSemana(y, dias, meta)}</p>
         <button type="button" class="boton-principal" data-accion="registrar" style="margin-top:16px">Registrar entrenamiento</button>
       </section>
+      <div id="importados"></div>
       ${tarjetaCambios()}
       <div id="por-responder"></div>
       <div id="pendientes-juntos"></div>
@@ -873,6 +876,7 @@
     cargarListaEntrenos();
     cargarPendientesJuntos($("pendientes-juntos"));
     cargarPorResponder($("por-responder"));
+    cargarImportados();
     cargarRutinas();
   }
 
@@ -1810,7 +1814,7 @@
     ["animo", "💗 Ánimo de tu pareja después de entrenar"], ["juntos", "💞 Confirmaciones de \"juntos\""],
     ["entreno_previsto", "🏋️‍♀️ Entrenamiento previsto (8:00)"], ["meta_pendiente", "⏳ Meta pendiente (domingo 17:00)"],
     ["multas", "💰 Multas y pagos"], ["sueno", "😴 Recordatorios de sueño"], ["lesion", "🩹 Seguimiento de lesiones"],
-    ["logros", "✨ Logros y rachas"], ["resumen", "📊 Resumen semanal (lunes)"], ["zona", "🛬 Cambios de zona horaria"]
+    ["logros", "✨ Logros y rachas"], ["ciclo", "🌸 Inicio del periodo de tu pareja"], ["peso", "⚖️ Recordatorio semanal de peso"], ["resumen", "📊 Resumen semanal (lunes)"], ["zona", "🛬 Cambios de zona horaria"]
   ];
   const instalada = () => window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
   const aUint8 = (b64) => {
@@ -1986,7 +1990,7 @@
     const destino = (String(url || "").split("#")[1] || "").trim();
     if (!destino || !estado || !perfil?.completado) return;
     if (destino === "mensajes") return vistaMensajes();
-    if (["inicio", "entrenar", "comida", "metas", "multas", "perfil", "ausencias", "recompensas", "mas"].includes(destino)) irA(destino);
+    if (["inicio", "entrenar", "comida", "metas", "multas", "perfil", "ausencias", "recompensas", "mas", "habitos", "checkin"].includes(destino)) irA(destino);
   }
   navigator.serviceWorker?.addEventListener("message", (e) => { if (e.data?.tipo === "abrir") abrirDesdeUrl(e.data.url); });
 
@@ -2363,7 +2367,8 @@
       <section class="tarjeta">
         <h3>${esMio ? "🔒 Nutrición del día" : "Macros que comparte"}</h3>
         ${esMio ? `<p class="ayuda" style="margin:0 0 6px">${d.tipo_dia === "entreno" ? "🏋️ Día de entreno" : "😌 Día de descanso"}${objetivos.calorias?.checkin ? " · calorías del check-in semanal" : ""}</p>` : ""}
-        ${esMio ? barraNutriente("Calorías", d.kcal, objetivos.calorias, "kcal") : ""}
+        ${esMio ? barraNutriente("Calorías", Number(d.kcal) + Number(d.kcal_alcohol || 0), objetivos.calorias, "kcal") : ""}
+        ${esMio && Number(d.kcal_alcohol) > 0 ? `<p class="ayuda" style="margin:0">Incluye ${Math.round(d.kcal_alcohol)} kcal de alcohol 🍷</p>` : ""}
         ${NUTRIS.map(([k, n]) => barraNutriente(n, d.macros?.[k] || 0, esMio ? objetivos[k] : null, "g")).join("")}
         ${d.macros ? `<p class="ayuda">Carbohidratos netos: <strong>${r1((d.macros.carbohidratos || 0) - (d.macros.fibra || 0))} g</strong>${esMio ? ` · Calorías según macros: ${Math.round(4 * (d.macros.proteina || 0) + 4 * (d.macros.carbohidratos || 0) + 9 * (d.macros.grasas || 0))} kcal` : ""}</p>` : ""}
         ${esMio && d.micros ? `<details class="historial"><summary>Micronutrientes</summary>${MICRO.map(([k, n, u]) => `<div class="nutri-cab" style="padding:6px 0"><span>${n}</span><strong>${r1(d.micros[k])} ${u}</strong></div>`).join("")}
@@ -2822,7 +2827,7 @@
     $("vista").innerHTML = `
       <h2 class="titulo">Más</h2>
       <div class="lista">
-        ${[["coach", "🤖", "Coach"], ["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
+        ${[["metas", "🎯", "Metas y retos"], ["coach", "🤖", "Coach"], ["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
            ["ausencias", "📝", "Ausencias y cupos"], ["exportar", "📤", "Exportar datos y reporte"], ["perfil", "👤", "Perfil y notificaciones"]].map(([v, e, n]) => `
           <button type="button" class="item" data-ir="${v}" style="min-height:64px"><span class="mini">${e}</span><span><strong>${n}</strong></span><span class="lado">›</span></button>`).join("")}
       </div>`;
@@ -3076,15 +3081,26 @@
   }
 
   // Chat con el coach
-  async function vistaCoach() {
+  const TEMAS_COACH = {
+    general: { titulo: "🤖 Coach", volver: "mas", sub: "Orientación personalizada para tu objetivo. No es consejo médico.",
+      rapidos: ["¿Qué entrenamiento me ayuda más con mi objetivo?", "¿Cómo llego a mi proteína de hoy?", "Dame ideas de snacks saludables", "¿Ya puedo subir de nivel?"] },
+    episodio: { titulo: "📓 Coach · registro personal", volver: "habitos", sub: "Un espacio sin juicios para entender tus episodios y encontrar estrategias. No sustituye a un profesional.",
+      rapidos: ["Quiero contarte lo que pasó", "¿Ves algún patrón en mis registros?", "¿Qué puedo hacer cuando siento que va a pasar?", "¿Cómo organizo mis comidas para que no me pase?"] },
+    lesion: { titulo: "🩹 Coach · lesiones y dolores", volver: "habitos", sub: "Cuidados, ajustes y ejercicios alternativos. No diagnostica: ante señales de alarma, consulta a un profesional.",
+      rapidos: ["Me duele al entrenar, te cuento", "¿Qué ejercicios puedo hacer sin cargar la zona?", "¿Cómo vuelvo a entrenar después de una lesión?", "¿Cómo caliento para evitar dolores?"] }
+  };
+  let temaCoach = "general";
+  async function vistaCoach(tema) {
+    if (tema) temaCoach = tema;
+    const T = TEMAS_COACH[temaCoach];
     vistaActual = "coach";
     document.querySelectorAll("#pestanas button").forEach((b) => { if (b.dataset.vista === "mas") b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     $("vista").innerHTML = `
-      <div class="cabecera-vista"><h2 class="titulo">🤖 Coach</h2><button type="button" data-ir="mas">Volver</button></div>
-      <p class="sub" id="co-uso">Orientación personalizada para tu objetivo. No es consejo médico.</p>
+      <div class="cabecera-vista"><h2 class="titulo" style="font-size:1.6rem">${T.titulo}</h2><button type="button" data-ir="${T.volver}">Volver</button></div>
+      <p class="sub" id="co-uso">${T.sub}</p>
       ${perfil.coach_activo ? "" : `<p class="aviso">El coach está apagado. Actívalo en Más → Perfil.</p>`}
       <div id="co-chat" class="chat"><p class="vacio">Cargando…</p></div>
-      <div class="chips rapidos">${["¿Qué entrenamiento me ayuda más con mi objetivo?", "¿Cómo llego a mi proteína de hoy?", "Dame ideas de snacks saludables", "¿Ya puedo subir de nivel?"]
+      <div class="chips rapidos">${T.rapidos
         .map((t) => `<button type="button" data-co-rapido="${esc(t)}">${t}</button>`).join("")}</div>
       <div class="escribir">
         <textarea id="co-texto" maxlength="1000" rows="1" placeholder="Pregúntale al coach…"></textarea>
@@ -3092,13 +3108,13 @@
       </div>`;
     const pintar = async () => {
       const [{ data }, uso] = await Promise.all([
-        db.from("coach_mensajes").select("*").eq("user_id", usuario.id).neq("texto", "").order("id", { ascending: false }).limit(40),
+        db.from("coach_mensajes").select("*").eq("user_id", usuario.id).eq("tema", temaCoach).neq("texto", "").order("id", { ascending: false }).limit(40),
         db.rpc("uso_ia_mes")]);
       if (!$("co-chat")) return;
       $("co-chat").innerHTML = (data || []).length ? [...data].reverse().map((m) =>
         `<div class="msg ${m.rol === "user" ? "mio " + (perfil.tema || "rosa") : "suyo coach"}"><span>${esc(m.texto)}</span></div>`).join("")
         : `<p class="vacio">Pregúntale lo que quieras sobre tus entrenamientos, tu alimentación o tus metas.</p>`;
-      if (uso.data != null) $("co-uso").textContent = `Orientación personalizada para tu objetivo. No es consejo médico. Uso de IA este mes: USD ${Number(uso.data).toFixed(2)} de 1.00.`;
+      if (uso.data != null) $("co-uso").textContent = `${T.sub} Uso de IA este mes: USD ${Number(uso.data).toFixed(2)} de 1.00.`;
       window.scrollTo(0, document.body.scrollHeight);
     };
     const enviar = async (texto) => {
@@ -3106,7 +3122,7 @@
       $("co-texto").value = "";
       $("co-chat").insertAdjacentHTML("beforeend", `<div class="msg mio ${perfil.tema || "rosa"}"><span>${esc(texto)}</span></div><div class="msg suyo coach" id="co-pensando"><span>Pensando…</span></div>`);
       window.scrollTo(0, document.body.scrollHeight);
-      try { await llamarCoach({ accion: "chat", texto }); } catch (err) { avisar(errorLegible(err)); }
+      try { await llamarCoach({ accion: "chat", texto, tema: temaCoach }); } catch (err) { avisar(errorLegible(err)); }
       pintar();
     };
     $("co-enviar").addEventListener("click", () => enviar($("co-texto").value));
@@ -3407,6 +3423,518 @@
   $("vista").addEventListener("click", (e) => {
     const b = e.target.closest("[data-exp]"); if (b) exportar(b.dataset.exp);
     const rc = e.target.closest("[data-receta]"); if (rc) editorReceta(rc.dataset.receta === "nueva" ? null : Number(rc.dataset.receta));
+  });
+
+  // ---------- Entrenamientos importados de Apple Salud (borradores por completar con evidencia)
+  async function cargarImportados() {
+    const cont = $("importados"); if (!cont) return;
+    const { data } = await db.from("entrenos").select("*").eq("user_id", usuario.id).eq("origen", "salud").eq("estado", "borrador")
+      .gte("fecha", sumarDias(yo().hoy, antesDelInicio() ? -7 : -1)).order("fecha", { ascending: false });
+    if (!data?.length) { cont.innerHTML = ""; return; }
+    cont.innerHTML = `<section class="tarjeta pendiente"><h3>📲 Importados de Apple Salud</h3>
+      <p>Añade la foto de evidencia (por ejemplo, la captura de Strava o del reloj) para que cuenten. Plazo: hasta mañana a las 12:00.</p>
+      <div class="lista" style="margin-top:10px">${data.map((e) => `
+        <div class="item" style="grid-template-columns:minmax(0,1fr) auto;min-height:0">
+          <span><strong>${TIPO[e.tipo].emoji} ${esc(nombreTipo(e))}</strong><span class="meta">${etiquetaFecha(e.fecha)}${e.hora ? " · " + e.hora.slice(0, 5) : ""} · ${esc(resumenEntreno(e))}${e.kcal_dispositivo ? ` · 🔒 ${e.kcal_dispositivo} kcal` : ""}</span></span>
+          <span style="display:grid;gap:4px"><button type="button" data-completar="${e.id}" style="min-height:36px;font-size:.88rem;padding:0 12px">Completar</button>
+            <button type="button" class="enlace" data-descartar="${e.id}" style="min-height:28px;font-size:.8rem;padding:0">Descartar</button></span>
+        </div>`).join("")}</div></section>`;
+  }
+  function hojaCompletar(id) {
+    const fotos = [];
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">Completar entrenamiento</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Añade de 1 a 3 fotos de evidencia y, si quieres, cómo te sentiste.</p>
+      <div class="fotos" id="cp-fotos"></div>
+      <span class="grupo-titulo" style="margin-top:16px">¿Cómo te sientes? (opcional)</span>
+      <div class="chips" id="cp-animo">${ANIMOS.map(([k, e, n]) => `<button type="button" data-animo="${k}" aria-pressed="false">${e} ${n}</button>`).join("")}</div>
+      <button type="button" class="boton-principal" id="cp-ok" style="margin-top:16px">Completar</button>`);
+    let animo = null;
+    const pintar = () => {
+      $("cp-fotos").innerHTML = fotos.map((x) => `<div class="foto" style="background-image:url('${x.url}')"></div>`).join("") +
+        (fotos.length < 3 ? `<label class="agregar-foto"><input type="file" accept="image/*" multiple id="cp-archivo">📷<br>Agregar</label>` : "");
+      $("cp-archivo")?.addEventListener("change", (e) => { for (const f of [...e.target.files].slice(0, 3 - fotos.length)) fotos.push({ file: f, url: URL.createObjectURL(f) }); pintar(); });
+    };
+    pintar();
+    $("cp-animo").addEventListener("click", (e) => { const b = e.target.closest("[data-animo]"); if (!b) return; animo = animo === b.dataset.animo ? null : b.dataset.animo;
+      $("cp-animo").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.animo === animo)); });
+    $("cp-ok").addEventListener("click", async (ev) => {
+      if (!fotos.length) return avisar("Agrega al menos una foto de evidencia.");
+      ev.target.disabled = true;
+      try {
+        for (let i = 0; i < fotos.length; i++) {
+          const base = `${usuario.id}/${id}/${Date.now()}-${i}`;
+          const [g, m] = await Promise.all([comprimir(fotos[i].file, 1280, 0.72), comprimir(fotos[i].file, 360, 0.7)]);
+          for (const [ruta, blob] of [[base + ".jpg", g], [base + "-mini.jpg", m]]) {
+            const up = await db.storage.from("evidencias").upload(ruta, blob, { contentType: "image/jpeg" }); if (up.error) throw up.error;
+          }
+          const r = await db.from("evidencias").insert({ entreno_id: id, user_id: usuario.id, ruta: base + ".jpg", miniatura: base + "-mini.jpg" }); if (r.error) throw r.error;
+        }
+        const r2 = await db.from("entrenos").update({ estado: "completado", animo }).eq("id", id); if (r2.error) throw r2.error;
+        cerrarHoja(); avisar("Entrenamiento completado. 💪", "ok"); await recargarEstado(); irA("entrenar");
+      } catch (err) { ev.target.disabled = false; avisar(errorLegible(err)); }
+    });
+  }
+  $("vista").addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-completar]"); if (c) return hojaCompletar(Number(c.dataset.completar));
+    const d = e.target.closest("[data-descartar]");
+    if (d && confirm("¿Descartar este entrenamiento importado? No contará.")) { await db.from("entrenos").delete().eq("id", Number(d.dataset.descartar)); cargarImportados(); }
+  });
+
+  // ================================================================ HÁBITOS: SALUD Y CUERPO (fase 10)
+  const BEBIDAS = { cerveza: ["🍺", "Cerveza", 330, 140], vino: ["🍷", "Vino", 150, 125], destilado: ["🥃", "Destilado", 45, 100], coctel: ["🍹", "Cóctel", 200, 200], otro: ["🥂", "Otra", 150, 120] };
+  const SINTOMAS = ["Cólicos", "Cansancio", "Hinchazón", "Dolor de cabeza", "Antojos", "Cambios de ánimo", "Sensibilidad", "Dolor de espalda"];
+  const EMOCIONES = ["Ansiedad", "Estrés", "Tristeza", "Aburrimiento", "Soledad", "Enojo", "Cansancio", "Celebración", "Otra"];
+  const SITUACIONES = ["Sola o solo en casa", "Después de trabajar o estudiar", "De noche", "Había comido poco antes", "Con otras personas", "Frente a una pantalla", "Otra"];
+  let habitosDe = "yo";
+  const hhmm = (t) => (t ? String(t).slice(0, 5) : "—");
+  const marca = (ok) => (ok ? "✓" : "✗");
+  const ahoraHHMM = () => { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+
+  async function vistaHabitos() {
+    vistaActual = "habitos";
+    const y = yo(), p = pareja();
+    const quien = habitosDe === "yo" ? y : p;
+    $("vista").innerHTML = `
+      <h2 class="titulo">Hábitos</h2>
+      <div class="segmentado" role="group" aria-label="Ver hábitos de">
+        <button type="button" data-hab-de="yo" aria-pressed="${habitosDe === "yo"}">Mis hábitos</button>
+        <button type="button" data-hab-de="pareja" aria-pressed="${habitosDe === "pareja"}">${esc(p?.nombre || "Pareja")}</button>
+      </div>
+      <div id="hab"><p class="vacio">Cargando…</p></div>`;
+    if (!quien) return;
+    const hoy = quien.hoy, lunes = quien.semana_actual, hace7 = sumarDias(hoy, -7), mesIni = hoy.slice(0, 8) + "01";
+    const esMio = habitosDe === "yo";
+    const [noches, alc, cic, dol, pas, eps, med, fotos, tok, evAnoche] = await Promise.all([
+      db.from("sueno").select("*").eq("user_id", quien.id).gte("fecha", sumarDias(hoy, -8)).order("fecha", { ascending: false }),
+      db.from("alcohol").select("*").eq("user_id", quien.id).gte("fecha", lunes).order("fecha", { ascending: false }),
+      db.from("ciclo").select("*").eq("user_id", quien.id).order("inicio", { ascending: false }).limit(3),
+      db.from("dolores").select("*").eq("user_id", quien.id).gte("fecha", sumarDias(hoy, -30)).order("fecha", { ascending: false }).limit(5),
+      db.from("pasos_diarios").select("*").eq("user_id", quien.id).gte("fecha", hace7).order("fecha", { ascending: false }),
+      db.from("episodios").select("*").eq("user_id", quien.id).gte("fecha", sumarDias(hoy, -60)).order("fecha", { ascending: false }),
+      esMio ? db.from("mediciones").select("*").eq("user_id", quien.id).order("fecha", { ascending: false }).limit(20) : db.from("mediciones").select("*").eq("user_id", quien.id).eq("compartido", true).order("fecha", { ascending: false }).limit(5),
+      db.from("fotos_progreso").select("*").eq("user_id", quien.id).order("fecha", { ascending: false }).limit(12),
+      esMio ? db.from("tokens_salud").select("ultimo_uso").eq("user_id", usuario.id).maybeSingle() : Promise.resolve({ data: null }),
+      db.rpc("evaluar_sueno", { p_user: quien.id, p_fecha: sumarDias(hoy, -1) })
+    ]);
+    if (noches.error) { $("hab").innerHTML = ""; return avisar(errorLegible(noches.error) + ". ¿Ejecutaste fase10.sql?"); }
+    if (vistaActual !== "habitos") return;
+    const ev = evAnoche.data;
+    const meta = quien.meta_mes;
+    const bebidasSemana = (alc.data || []).reduce((a, x) => a + Number(x.cantidad), 0);
+    const cicloAbierto = (cic.data || []).find((c) => !c.fin);
+    const pasosHoy = (pas.data || []).find((x) => x.fecha === hoy)?.pasos;
+    const epsSemana = (eps.data || []).filter((e) => e.fecha >= lunes).length;
+    const epsMes = (eps.data || []).filter((e) => e.fecha >= mesIni).length;
+    const pesos = (med.data || []).filter((m) => m.peso_kg && m.tipo === "peso");
+    const inbodys = (med.data || []).filter((m) => m.tipo === "inbody");
+    const borradores = esMio ? (await db.from("entrenos").select("id").eq("user_id", usuario.id).eq("origen", "salud").eq("estado", "borrador")).data || [] : [];
+    const muestraCiclo = (esMio ? perfil.sexo === "femenino" : false) || (cic.data || []).length > 0;
+
+    $("hab").innerHTML = `
+      <section class="tarjeta">
+        <div class="nutri-cab"><h3 style="margin:0">😴 Sueño</h3>${esMio ? `<button type="button" class="enlace" data-hab="sueno" style="width:auto;min-height:0;padding:0">+ Registrar</button>` : ""}</div>
+        ${ev ? `<p>Anoche: <strong>${hhmm(ev.dormir)} → ${hhmm(ev.despertar)}</strong> · ${r1(ev.horas)} h ${ev.neutral ? "· 🎉 salida nocturna (neutral)" : ""}</p>
+          ${ev.neutral ? "" : `<div class="chips" style="margin-top:8px">
+            <span class="etiqueta ${ev.cumple_dormir ? "etiqueta-ok" : "etiqueta-aviso"}">${marca(ev.cumple_dormir)} Dormir${ev.objetivo_dormir ? " (" + hhmm(ev.objetivo_dormir) + ")" : ""}</span>
+            <span class="etiqueta ${ev.cumple_despertar ? "etiqueta-ok" : "etiqueta-aviso"}">${marca(ev.cumple_despertar)} Despertar${ev.objetivo_despertar ? " (" + hhmm(ev.objetivo_despertar) + ")" : ""}</span>
+            <span class="etiqueta ${ev.cumple_horas ? "etiqueta-ok" : "etiqueta-aviso"}">${marca(ev.cumple_horas)} Horas</span></div>`}`
+          : `<p>${esMio ? "Todavía no registraste cómo dormiste anoche." : "Sin registro de anoche."}</p>`}
+        ${(noches.data || []).length ? `<div class="semana-sueno">${(noches.data || []).slice(0, 7).reverse().map((n) => `<span><small>${fmt(n.fecha, { weekday: "narrow" })}</small><strong>${r1(n.horas)}</strong></span>`).join("")}</div>` : ""}
+      </section>
+
+      <section class="tarjeta">
+        <div class="nutri-cab"><h3 style="margin:0">🍷 Alcohol</h3>${esMio ? `<button type="button" class="enlace" data-hab="alcohol" style="width:auto;min-height:0;padding:0">+ Registrar</button>` : ""}</div>
+        <p>Esta semana: <strong>${r1(bebidasSemana)} bebida${bebidasSemana === 1 ? "" : "s"}</strong>${meta?.alcohol_bebidas_semana != null ? ` de ${meta.alcohol_bebidas_semana} ${bebidasSemana > meta.alcohol_bebidas_semana ? "⚠️" : "✓"}` : ""}</p>
+        ${(alc.data || []).slice(0, 4).map((a) => `<p class="ayuda" style="margin:2px 0">${BEBIDAS[a.bebida][0]} ${etiquetaFecha(a.fecha)} · ${r1(a.cantidad)} × ${BEBIDAS[a.bebida][1].toLowerCase()}${esMio ? ` · ${a.kcal} kcal` : ""}${esMio ? ` <button type="button" class="enlace" data-borrar-alc="${a.id}" style="width:auto;min-height:0;padding:0 4px;display:inline">Borrar</button>` : ""}</p>`).join("")}
+      </section>
+
+      <section class="tarjeta">
+        <div class="nutri-cab"><h3 style="margin:0">👣 Pasos</h3>${esMio ? `<button type="button" class="enlace" data-ir="salud" style="width:auto;min-height:0;padding:0">${tok.data ? "Apple Salud ✓" : "Conectar Apple Salud"}</button>` : ""}</div>
+        <p>${pasosHoy != null ? `Hoy: <strong>${Number(pasosHoy).toLocaleString("es")}</strong> pasos` : "Sin pasos registrados hoy."}</p>
+        ${(pas.data || []).length > 1 ? `<p class="ayuda">Promedio 7 días: ${Math.round((pas.data || []).reduce((a, x) => a + x.pasos, 0) / (pas.data || []).length).toLocaleString("es")} pasos. Los pasos no cuentan como entrenamiento.</p>` : ""}
+        ${esMio && borradores.length ? `<p class="aviso">📲 Tienes ${borradores.length} entrenamiento${borradores.length === 1 ? "" : "s"} importado${borradores.length === 1 ? "" : "s"} de Apple Salud por completar con evidencia.</p>
+          <button type="button" class="secundario" data-ir="entrenar">Completarlos en Entrenar</button>` : ""}
+      </section>
+
+      ${muestraCiclo ? `<section class="tarjeta">
+        <div class="nutri-cab"><h3 style="margin:0">🌸 Ciclo</h3></div>
+        <p>${cicloAbierto ? `En periodo · día <strong>${Math.round((aFecha(hoy) - aFecha(cicloAbierto.inicio)) / 864e5) + 1}</strong>${cicloAbierto.sintomas?.length ? " · " + cicloAbierto.sintomas.join(", ").toLowerCase() : ""}`
+          : (cic.data || [])[0] ? `Último periodo: ${fechaCorta(cic.data[0].inicio)}${cic.data[0].fin ? " – " + fechaCorta(cic.data[0].fin) : ""}` : "Sin registros."}</p>
+        ${esMio ? (cicloAbierto ? `<div class="acciones-juntos"><button type="button" class="secundario" style="margin:0" data-hab="ciclo-sintomas" data-id="${cicloAbierto.id}">Síntomas</button><button type="button" style="margin:0" data-hab="ciclo-fin" data-id="${cicloAbierto.id}">Terminó hoy</button></div>`
+          : `<button type="button" class="secundario" data-hab="ciclo-inicio">Empezó mi periodo</button><p class="ayuda">${esc(pareja()?.nombre || "Tu pareja")} recibirá un aviso para estar más atento estos días.</p>`) : ""}
+      </section>` : ""}
+
+      <section class="tarjeta">
+        <div class="nutri-cab"><h3 style="margin:0">🩹 Lesiones y dolores</h3>${esMio ? `<button type="button" class="enlace" data-hab="dolor" style="width:auto;min-height:0;padding:0">+ Registrar</button>` : ""}</div>
+        ${(dol.data || []).length ? (dol.data || []).map((d) => `<p class="ayuda" style="margin:4px 0">${d.tipo === "lesion" ? "🩹" : "⚡"} ${etiquetaFecha(d.fecha)} · <strong>${esc(d.zona)}</strong> · intensidad ${d.intensidad}/10${d.momento ? " · " + esc(d.momento) : ""}</p>`).join("") : `<p>Sin dolores registrados en el último mes.</p>`}
+        ${esMio ? `<div class="acciones-juntos" style="margin-top:10px"><button type="button" class="secundario" style="margin:0" data-hab="coach-lesion">🤖 Hablar con el coach</button><button type="button" class="secundario" style="margin:0" data-exc="lesion">Pausa y tratamientos</button></div>` : ""}
+      </section>
+
+      ${esMio ? `<section class="tarjeta">
+        <div class="nutri-cab"><h3 style="margin:0">⚖️ Cuerpo</h3><span class="privado" style="margin:0">🔒 Privado</span></div>
+        <p>${pesos[0] ? `Último peso: <strong>${pesos[0].peso_kg} kg</strong> (${fechaCorta(pesos[0].fecha)})` : "Sin pesos registrados."}</p>
+        ${inbodys[0] ? `<p class="ayuda">Último InBody (${fechaCorta(inbodys[0].fecha)}): ${inbodys[0].grasa_pct != null ? inbodys[0].grasa_pct + " % grasa · " : ""}${inbodys[0].masa_muscular_kg != null ? inbodys[0].masa_muscular_kg + " kg músculo" : ""}${inbodys[0].compartido ? " · compartido" : ""}</p>` : ""}
+        <div class="botones-alimento">
+          <button type="button" class="secundario" data-ir="checkin">⚖️ Peso y tendencia</button>
+          <button type="button" class="secundario" data-hab="inbody">📊 Registrar InBody</button>
+          <button type="button" class="secundario" data-hab="foto">📸 Foto de progreso</button>
+          <button type="button" class="secundario" data-hab="fotos" ${(fotos.data || []).length ? "" : "disabled"}>🖼️ Ver y comparar (${(fotos.data || []).length})</button>
+        </div>
+      </section>` : `${(fotos.data || []).length || (med.data || []).length ? `<section class="tarjeta"><h3>⚖️ Lo que comparte contigo</h3>
+          ${(med.data || []).map((m) => `<p class="ayuda">${m.tipo === "inbody" ? "📊 InBody" : "⚖️ Peso"} · ${fechaCorta(m.fecha)}${m.peso_kg ? " · " + m.peso_kg + " kg" : ""}${m.grasa_pct != null ? " · " + m.grasa_pct + " % grasa" : ""}</p>`).join("")}
+          ${(fotos.data || []).length ? `<button type="button" class="secundario" data-hab="fotos">🖼️ Ver fotos compartidas (${(fotos.data || []).length})</button>` : ""}</section>` : ""}`}
+
+      ${esMio ? `<section class="tarjeta">
+        <h3>📓 Registro personal</h3><p class="privado" style="margin:4px 0 0">🔒 Privado: tú decides qué compartir.</p>
+        <p>Esta semana: <strong>${epsSemana}</strong> · este mes: <strong>${epsMes}</strong>. Es un espacio para entender patrones, sin castigos.</p>
+        ${patronesEpisodios(eps.data || [])}
+        <div class="acciones-juntos" style="margin-top:10px"><button type="button" class="secundario" style="margin:0" data-hab="episodio">Registrar un episodio</button>
+          <button type="button" class="secundario" style="margin:0" data-hab="coach-episodio">🤖 Hablar con el coach</button></div>
+      </section>` : (eps.data || []).length ? `<section class="tarjeta"><h3>📓 Lo que ${esc(quien.nombre)} decidió compartir</h3>
+          ${(eps.data || []).slice(0, 5).map((e) => `<p class="ayuda">${etiquetaFecha(e.fecha)}${e.hora ? " · " + hhmm(e.hora) : ""}${e.emociones?.length ? " · " + e.emociones.join(", ").toLowerCase() : ""}${e.nota ? "<br>" + esc(e.nota) : ""}</p>`).join("")}
+          <p class="ayuda">Acompáñale con cariño y sin juicios. 💗</p></section>` : ""}`;
+  }
+
+  // Patrones simples a partir de los episodios registrados
+  function patronesEpisodios(eps) {
+    if (eps.length < 2) return eps.length ? `<p class="ayuda">Con más registros verás aquí patrones de horario, situaciones y emociones.</p>` : "";
+    const cuenta = (lista) => Object.entries(lista.reduce((a, k) => ((a[k] = (a[k] || 0) + 1), a), {})).sort((x, y) => y[1] - x[1]).slice(0, 3);
+    const franja = (h) => { if (!h) return null; const n = Number(String(h).slice(0, 2)); return n < 12 ? "Mañana" : n < 17 ? "Tarde" : n < 21 ? "Noche" : "Muy tarde"; };
+    const franjas = cuenta(eps.map((e) => franja(e.hora)).filter(Boolean));
+    const emo = cuenta(eps.flatMap((e) => e.emociones || []));
+    const sit = cuenta(eps.flatMap((e) => e.situacion || []));
+    const fila = (t, l) => l.length ? `<p class="ayuda" style="margin:2px 0"><strong>${t}:</strong> ${l.map(([k, n]) => `${k.toLowerCase()} (${n})`).join(", ")}</p>` : "";
+    return `<details class="historial"><summary>Patrones de los últimos 60 días</summary>${fila("Horario", franjas)}${fila("Emociones", emo)}${fila("Situaciones", sit)}
+      <p class="ayuda">Son coincidencias en tus registros, no causas. Si quieres, coméntalas con el coach o con un profesional.</p></details>`;
+  }
+
+  // ---------- Hojas de registro
+  function chipsMulti(id, opciones, sel = []) {
+    return `<div class="chips" id="${id}">${opciones.map((o) => `<button type="button" data-v="${esc(o)}" aria-pressed="${sel.includes(o)}">${o}</button>`).join("")}</div>`;
+  }
+  const leerChips = (id) => [...document.querySelectorAll(`#${id} button[aria-pressed="true"]`)].map((b) => b.dataset.v);
+  const activarChips = (id, unico = false) => $(id)?.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-v]"); if (!b) return;
+    if (unico) $(id).querySelectorAll("button").forEach((x) => x !== b && x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
+  });
+
+  async function hojaSueno() {
+    const y = yo(), anoche = sumarDias(y.hoy, -1);
+    const { data: ms } = await db.from("metas_semanales").select("*").eq("user_id", usuario.id).lte("semana", y.semana_actual).order("semana", { ascending: false }).limit(1);
+    const m = ms?.[0];
+    const objD = m ? (["5", "6"].includes(String(new Date(anoche + "T12:00:00Z").getUTCDay() === 0 ? 7 : new Date(anoche + "T12:00:00Z").getUTCDay())) ? m.dormir_finde : m.dormir_semana) : null;
+    const { data: prev } = await db.from("sueno").select("*").eq("user_id", usuario.id).eq("fecha", anoche).maybeSingle();
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">😴 ¿Cómo dormiste?</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Noche del ${nombreDia(anoche)}. Sin evidencia: confiamos en tu honestidad.</p>
+      <div class="fila campo">
+        <div><label for="sn-d">😴 Me dormí</label><input id="sn-d" type="time" value="${hhmm(prev?.dormir || objD || "23:00").replace("—", "23:00")}"></div>
+        <div><label for="sn-w">⏰ Desperté</label><input id="sn-w" type="time" value="${prev?.despertar ? hhmm(prev.despertar) : "07:00"}"></div>
+      </div>
+      <p class="duracion" id="sn-dur"></p>
+      <label class="interruptor campo" style="margin-top:12px"><span>🎉 Fue una salida nocturna</span><input id="sn-salida" type="checkbox" ${prev?.salida ? "checked" : ""}></label>
+      <p class="ayuda" style="margin:-10px 0 14px">Solo es neutral los viernes, sábados o días especiales, con un máximo de 3 al mes.</p>
+      <div class="campo"><label for="sn-notas">Notas (opcional)</label><textarea id="sn-notas" maxlength="500">${esc(prev?.notas || "")}</textarea></div>
+      <button type="button" class="boton-principal" id="sn-ok">Guardar</button>`);
+    const dur = () => { const d = duracion($("sn-d").value, $("sn-w").value); $("sn-dur").textContent = d ? "Total: " + textoDuracion(d) : ""; };
+    dur(); $("sn-d").addEventListener("input", dur); $("sn-w").addEventListener("input", dur);
+    $("sn-ok").addEventListener("click", async () => {
+      const r = await db.from("sueno").upsert({ user_id: usuario.id, fecha: anoche, dormir: $("sn-d").value, despertar: $("sn-w").value,
+        salida: $("sn-salida").checked, notas: $("sn-notas").value.trim() || null }, { onConflict: "user_id,fecha" }).select("salida, salida_neutral").single();
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja();
+      avisar(r.data?.salida && !r.data.salida_neutral ? "Guardado. Esa salida no cuenta como neutral (día no permitido o sin saldo)." : "Sueño registrado. 😴", "ok");
+      vistaHabitos();
+    });
+  }
+
+  function hojaAlcohol() {
+    let bebida = "cerveza";
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">🍷 Registrar bebida</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <div class="tipos" id="al-tipo" style="margin-bottom:14px">${Object.entries(BEBIDAS).map(([k, [e, n]]) => `<button type="button" data-al="${k}" aria-pressed="${k === bebida}"><span>${e}</span>${n}</button>`).join("")}</div>
+      <div class="fila campo">
+        <div><label for="al-cant">Cantidad (bebidas)</label><input id="al-cant" type="number" inputmode="decimal" min="0.5" step="0.5" value="1"></div>
+        <div><label for="al-ml">ml por bebida</label><input id="al-ml" type="number" inputmode="numeric" min="1" value="${BEBIDAS[bebida][2]}"></div>
+      </div>
+      <div class="fila campo">
+        <div><label for="al-fecha">Día</label><select id="al-fecha"><option value="${yo().hoy}">Hoy</option><option value="${sumarDias(yo().hoy, -1)}">Ayer</option></select></div>
+        <div><label for="al-kcal">Calorías (estimadas)</label><input id="al-kcal" type="number" inputmode="numeric" min="0" value="${BEBIDAS[bebida][3]}"></div>
+      </div>
+      <p class="ayuda" style="margin:-8px 0 14px">🔒 Las calorías son privadas y se suman a tu día de comida.</p>
+      <div class="campo"><label for="al-notas">Notas (opcional)</label><input id="al-notas" maxlength="300"></div>
+      <button type="button" class="boton-principal" id="al-ok">Guardar</button>`);
+    const recalcular = () => {
+      const [, , mlBase, kBase] = BEBIDAS[bebida];
+      $("al-kcal").value = Math.round(kBase * (Number($("al-ml").value || mlBase) / mlBase) * Number($("al-cant").value || 1));
+    };
+    $("al-tipo").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-al]"); if (!b) return;
+      bebida = b.dataset.al; $("al-tipo").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+      $("al-ml").value = BEBIDAS[bebida][2]; recalcular();
+    });
+    $("al-cant").addEventListener("input", recalcular); $("al-ml").addEventListener("input", recalcular);
+    $("al-ok").addEventListener("click", async () => {
+      const r = await db.from("alcohol").insert({ user_id: usuario.id, fecha: $("al-fecha").value, hora: ahoraHHMM(), bebida,
+        cantidad: Number($("al-cant").value), ml: Number($("al-ml").value) || null, kcal: Number($("al-kcal").value) || 0, notas: $("al-notas").value.trim() || null });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Bebida registrada.", "ok"); vistaHabitos();
+    });
+  }
+
+  function hojaCiclo(id = null, actuales = []) {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">🌸 ${id ? "Síntomas" : "Empezó mi periodo"}</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      ${id ? "" : `<div class="campo"><label for="ci-ini">Día de inicio</label><select id="ci-ini"><option value="${yo().hoy}">Hoy</option><option value="${sumarDias(yo().hoy, -1)}">Ayer</option><option value="${sumarDias(yo().hoy, -2)}">Anteayer</option></select></div>`}
+      <span class="grupo-titulo">Síntomas (opcional)</span>${chipsMulti("ci-sint", SINTOMAS, actuales)}
+      <span class="grupo-titulo" style="margin-top:14px">Intensidad</span>${chipsMulti("ci-int", ["Leve", "Moderada", "Fuerte"])}
+      <button type="button" class="boton-principal" id="ci-ok" style="margin-top:16px">Guardar</button>`);
+    activarChips("ci-sint"); activarChips("ci-int", true);
+    $("ci-ok").addEventListener("click", async () => {
+      const int = { Leve: 1, Moderada: 2, Fuerte: 3 }[leerChips("ci-int")[0]] || null;
+      const r = id
+        ? await db.from("ciclo").update({ sintomas: leerChips("ci-sint"), intensidad: int }).eq("id", id)
+        : await db.from("ciclo").insert({ user_id: usuario.id, inicio: $("ci-ini").value, sintomas: leerChips("ci-sint"), intensidad: int });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar(id ? "Síntomas guardados." : "Registrado. Cuídate mucho estos días. 🌸", "ok"); vistaHabitos();
+    });
+  }
+
+  function hojaDolor() {
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">🩹 Dolor o lesión</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <div class="opciones campo"><label><input type="radio" name="do-tipo" value="dolor" checked><span>⚡ Dolor</span></label><label><input type="radio" name="do-tipo" value="lesion"><span>🩹 Lesión</span></label></div>
+      <div class="campo"><label for="do-zona">Zona</label><input id="do-zona" maxlength="80" placeholder="Ej.: rodilla derecha, zona lumbar"></div>
+      <div class="campo"><label for="do-int">Intensidad: <strong id="do-int-v">4</strong>/10</label><input id="do-int" type="range" min="1" max="10" value="4" style="height:auto;padding:0;border:0;background:none"></div>
+      <div class="campo"><label for="do-mom">¿Cuándo aparece?</label><input id="do-mom" maxlength="200" placeholder="Ej.: al bajar en la sentadilla, al correr"></div>
+      <div class="campo"><label for="do-notas">Notas (opcional)</label><textarea id="do-notas" maxlength="500"></textarea></div>
+      <button type="button" class="boton-principal" id="do-ok">Guardar</button>
+      <p class="ayuda">Si es una lesión que te impide entrenar, justifica el día como "Lesión" y, desde el segundo día, puedes pedir una pausa.</p>`);
+    $("do-int").addEventListener("input", (e) => ($("do-int-v").textContent = e.target.value));
+    $("do-ok").addEventListener("click", async () => {
+      const zona = $("do-zona").value.trim(); if (!zona) return avisar("Indica la zona.");
+      const r = await db.from("dolores").insert({ user_id: usuario.id, fecha: yo().hoy, tipo: document.querySelector('input[name="do-tipo"]:checked').value,
+        zona, intensidad: Number($("do-int").value), momento: $("do-mom").value.trim() || null, notas: $("do-notas").value.trim() || null });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Registrado.", "ok");
+      if (perfil.coach_activo && confirm("¿Quieres contarle al coach para que te sugiera ajustes?")) return vistaCoach("lesion");
+      vistaHabitos();
+    });
+  }
+
+  async function hojaEpisodio() {
+    const hoy = yo().hoy;
+    const { data: comidas } = await db.from("comidas").select("id, nombre, categoria, fecha, hora").eq("user_id", usuario.id).eq("estado", "completa").eq("saltada", false)
+      .gte("fecha", sumarDias(hoy, -1)).order("fecha", { ascending: false }).order("hora", { ascending: false });
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">📓 Registro personal</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">Gracias por registrarlo. Esto no resta puntos ni cambia tu mascota: sirve para entender qué pasa y cuidarte mejor.</p>
+      <div class="fila campo">
+        <div><label for="ep-fecha">Día</label><select id="ep-fecha"><option value="${hoy}">Hoy</option><option value="${sumarDias(hoy, -1)}">Ayer</option></select></div>
+        <div><label for="ep-hora">Hora aproximada</label><input id="ep-hora" type="time" value="${ahoraHHMM()}"></div>
+      </div>
+      ${(comidas || []).length ? `<span class="grupo-titulo">Comidas que formaron parte (no cuentan en tu regla de comidas)</span>
+        <div class="lista" id="ep-comidas">${comidas.map((c) => `<label class="interruptor" style="padding:10px 12px"><span style="font-weight:500">${CAT[c.categoria].emoji} ${esc(c.nombre)} <small>· ${etiquetaFecha(c.fecha).toLowerCase()}</small></span><input type="checkbox" value="${c.id}"></label>`).join("")}</div>` : ""}
+      <span class="grupo-titulo" style="margin-top:14px">¿Qué estabas haciendo? (opcional)</span>${chipsMulti("ep-sit", SITUACIONES)}
+      <span class="grupo-titulo" style="margin-top:14px">¿Cómo te sentías? (opcional)</span>${chipsMulti("ep-emo", EMOCIONES)}
+      <div class="campo" style="margin-top:14px"><label for="ep-nota">Lo que quieras contar (opcional)</label><textarea id="ep-nota" maxlength="2000"></textarea></div>
+      <label class="interruptor campo"><span>Compartir este registro con ${esc(pareja()?.nombre || "tu pareja")}</span><input id="ep-comp" type="checkbox"></label>
+      <button type="button" class="boton-principal" id="ep-ok">Guardar</button>`);
+    activarChips("ep-sit"); activarChips("ep-emo");
+    $("ep-ok").addEventListener("click", async () => {
+      const ids = [...document.querySelectorAll("#ep-comidas input:checked")].map((i) => Number(i.value));
+      const r = await db.from("episodios").insert({ user_id: usuario.id, fecha: $("ep-fecha").value, hora: $("ep-hora").value || null, comidas: ids,
+        situacion: leerChips("ep-sit"), emociones: leerChips("ep-emo"), nota: $("ep-nota").value.trim() || null, compartido: $("ep-comp").checked });
+      if (r.error) return avisar(errorLegible(r.error));
+      cerrarHoja(); avisar("Registrado. Sé amable contigo. 💗", "ok");
+      if (perfil.coach_activo && confirm("¿Quieres hablarlo con el coach? Puede ayudarte a encontrar estrategias.")) return vistaCoach("episodio");
+      vistaHabitos();
+    });
+  }
+
+  function hojaInbody() {
+    let archivo = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">📊 InBody</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">🔒 Privado. Puedes compartirlo con tu pareja si quieres.</p>
+      <label class="boton-archivo secundario"><input type="file" accept="image/*" id="ib-foto">📷 Foto del informe</label>
+      ${perfil.coach_activo ? `<p class="ayuda" id="ib-estado">Con la foto, la IA intentará leer los valores; revísalos antes de guardar.</p>` : ""}
+      <div class="fila campo" style="margin-top:12px">
+        <div><label for="ib-fecha">Fecha</label><input id="ib-fecha" type="date" value="${yo().hoy}" max="${yo().hoy}"></div>
+        <div><label for="ib-peso">Peso (kg)</label><input id="ib-peso" type="number" inputmode="decimal" step="0.1"></div>
+      </div>
+      <div class="fila campo">
+        <div><label for="ib-grasa">Grasa corporal (%)</label><input id="ib-grasa" type="number" inputmode="decimal" step="0.1"></div>
+        <div><label for="ib-musc">Masa muscular (kg)</label><input id="ib-musc" type="number" inputmode="decimal" step="0.1"></div>
+      </div>
+      <div class="campo"><label for="ib-mgrasa">Masa grasa (kg)</label><input id="ib-mgrasa" type="number" inputmode="decimal" step="0.1"></div>
+      <input type="hidden" id="ib-otros" value="{}">
+      <label class="interruptor campo"><span>Compartir con ${esc(pareja()?.nombre || "tu pareja")}</span><input id="ib-comp" type="checkbox"></label>
+      <button type="button" class="boton-principal" id="ib-ok">Guardar</button>`);
+    $("ib-foto").addEventListener("change", async (e) => {
+      archivo = e.target.files[0] || null;
+      if (!archivo || !perfil.coach_activo) return;
+      $("ib-estado").textContent = "🤖 Leyendo el informe…";
+      try {
+        const { informe: i } = await llamarCoach({ accion: "inbody", imagen: await aBase64(await comprimir(archivo, 1400, 0.8)) });
+        if (i.fecha) $("ib-fecha").value = i.fecha;
+        if (i.peso_kg) $("ib-peso").value = i.peso_kg;
+        if (i.grasa_pct) $("ib-grasa").value = i.grasa_pct;
+        if (i.masa_muscular_kg) $("ib-musc").value = i.masa_muscular_kg;
+        if (i.masa_grasa_kg) $("ib-mgrasa").value = i.masa_grasa_kg;
+        $("ib-otros").value = JSON.stringify(i.otros || {});
+        $("ib-estado").textContent = "Valores leídos: revísalos antes de guardar.";
+      } catch (err) { $("ib-estado").textContent = errorLegible(err); }
+    });
+    $("ib-ok").addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      try {
+        let ruta = null;
+        if (archivo) {
+          ruta = `${usuario.id}/inbody-${Date.now()}.jpg`;
+          const up = await db.storage.from("cuerpo").upload(ruta, await comprimir(archivo, 1600, 0.8), { contentType: "image/jpeg" });
+          if (up.error) throw up.error;
+        }
+        const n = (id) => ($(id).value === "" ? null : Number($(id).value));
+        const r = await db.from("mediciones").insert({ user_id: usuario.id, tipo: "inbody", fecha: $("ib-fecha").value, peso_kg: n("ib-peso"),
+          grasa_pct: n("ib-grasa"), masa_muscular_kg: n("ib-musc"), masa_grasa_kg: n("ib-mgrasa"), otros: JSON.parse($("ib-otros").value || "{}"),
+          archivo_ruta: ruta, compartido: $("ib-comp").checked });
+        if (r.error) throw r.error;
+        cerrarHoja(); avisar("InBody guardado. 🔒", "ok"); vistaHabitos();
+      } catch (err) { e.target.disabled = false; avisar(errorLegible(err)); }
+    });
+  }
+
+  function hojaFotoProgreso() {
+    let archivo = null;
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">📸 Foto de progreso</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="sub">🔒 Privada por defecto. Para comparar mejor, usa la misma luz, lugar y postura.</p>
+      <div id="fp-prev"><label class="agregar-foto" style="aspect-ratio:auto;padding:28px"><input type="file" accept="image/*" id="fp-archivo">📷 Tomar o elegir foto</label></div>
+      <div class="campo" style="margin-top:12px"><label for="fp-nota">Nota (opcional)</label><input id="fp-nota" maxlength="300"></div>
+      <label class="interruptor campo"><span>Compartir esta foto con ${esc(pareja()?.nombre || "tu pareja")}</span><input id="fp-comp" type="checkbox"></label>
+      <button type="button" class="boton-principal" id="fp-ok">Guardar</button>`);
+    $("fp-archivo").addEventListener("change", (e) => {
+      archivo = e.target.files[0] || null;
+      if (archivo) $("fp-prev").innerHTML = `<div class="galeria"><img src="${URL.createObjectURL(archivo)}" alt="Vista previa"></div>`;
+    });
+    $("fp-ok").addEventListener("click", async (e) => {
+      if (!archivo) return avisar("Elige la foto.");
+      e.target.disabled = true;
+      try {
+        const ruta = `${usuario.id}/progreso-${Date.now()}.jpg`;
+        const up = await db.storage.from("cuerpo").upload(ruta, await comprimir(archivo, 1400, 0.8), { contentType: "image/jpeg" });
+        if (up.error) throw up.error;
+        const r = await db.from("fotos_progreso").insert({ user_id: usuario.id, fecha: yo().hoy, ruta, compartida: $("fp-comp").checked, nota: $("fp-nota").value.trim() || null });
+        if (r.error) throw r.error;
+        cerrarHoja(); avisar("Foto guardada. 🔒", "ok"); vistaHabitos();
+      } catch (err) { e.target.disabled = false; avisar(errorLegible(err)); }
+    });
+  }
+
+  async function hojaVerFotos() {
+    const quien = habitosDe === "yo" ? yo() : pareja();
+    const { data } = await db.from("fotos_progreso").select("*").eq("user_id", quien.id).order("fecha", { ascending: true });
+    const lista = data || [];
+    const { data: urls } = await db.storage.from("cuerpo").createSignedUrls(lista.map((f) => f.ruta), 1800);
+    const u = Object.fromEntries((urls || []).map((x) => [x.path, x.signedUrl]));
+    const esMio = quien.id === usuario.id;
+    let a = 0, b = lista.length - 1;
+    const pintar = () => {
+      $("vf-comp").innerHTML = lista.length > 1 ? `<div class="comparar">
+          <figure><img src="${u[lista[a].ruta]}" alt="Antes"><figcaption>${fechaCorta(lista[a].fecha)}</figcaption></figure>
+          <figure><img src="${u[lista[b].ruta]}" alt="Después"><figcaption>${fechaCorta(lista[b].fecha)}</figcaption></figure></div>` : "";
+    };
+    abrirHoja(`
+      <div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.5rem">🖼️ Progreso</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      ${lista.length > 1 ? `<div class="fila campo"><div><label for="vf-a">Antes</label><select id="vf-a">${lista.map((f, i) => `<option value="${i}" ${i === a ? "selected" : ""}>${fechaCorta(f.fecha)}</option>`).join("")}</select></div>
+        <div><label for="vf-b">Después</label><select id="vf-b">${lista.map((f, i) => `<option value="${i}" ${i === b ? "selected" : ""}>${fechaCorta(f.fecha)}</option>`).join("")}</select></div></div>` : ""}
+      <div id="vf-comp"></div>
+      <div class="lista" style="margin-top:14px">${[...lista].reverse().map((f) => `
+        <div class="tarjeta" style="margin:0">
+          <img src="${u[f.ruta]}" alt="Foto de progreso" style="width:100%;border-radius:12px">
+          <p class="ayuda">${fechaCorta(f.fecha)}${f.nota ? " · " + esc(f.nota) : ""}</p>
+          ${esMio ? `<label class="interruptor"><span>Compartida</span><input type="checkbox" data-fp-comp="${f.id}" ${f.compartida ? "checked" : ""}></label>
+            <button type="button" class="enlace" data-fp-borrar="${f.id}" data-ruta="${esc(f.ruta)}" style="color:var(--error)">Eliminar</button>` : ""}
+        </div>`).join("")}</div>`);
+    pintar();
+    $("vf-a")?.addEventListener("change", (e) => { a = Number(e.target.value); pintar(); });
+    $("vf-b")?.addEventListener("change", (e) => { b = Number(e.target.value); pintar(); });
+    $("hoja-contenido").addEventListener("change", async (e) => {
+      const c = e.target.closest("[data-fp-comp]"); if (!c) return;
+      const r = await db.from("fotos_progreso").update({ compartida: c.checked }).eq("id", Number(c.dataset.fpComp));
+      if (r.error) { c.checked = !c.checked; return avisar(errorLegible(r.error)); }
+      avisar(c.checked ? "Ahora tu pareja puede ver esta foto." : "Foto privada otra vez.", "ok");
+    });
+    $("hoja-contenido").addEventListener("click", async (e) => {
+      const d = e.target.closest("[data-fp-borrar]"); if (!d) return;
+      if (!confirm("¿Eliminar esta foto?")) return;
+      await db.from("fotos_progreso").delete().eq("id", Number(d.dataset.fpBorrar));
+      await db.storage.from("cuerpo").remove([d.dataset.ruta]);
+      cerrarHoja(); vistaHabitos();
+    });
+  }
+
+  // ---------- Apple Salud: token y Atajo
+  async function vistaSalud() {
+    vistaActual = "salud";
+    const { data: t } = await db.from("tokens_salud").select("ultimo_uso, creado_en").eq("user_id", usuario.id).maybeSingle();
+    const url = cfg.supabaseUrl.replace(/\/+$/, "") + "/functions/v1/salud";
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo" style="font-size:1.6rem">📲 Apple Salud</h2><button type="button" data-ir="habitos">Volver</button></div>
+      <p class="sub">Un Atajo de iOS envía cada noche tus pasos y tus entrenamientos (de Strava, del reloj o de cualquier app que guarde en Salud). Los entrenamientos llegan como borradores: los completas con tu foto de evidencia.</p>
+      <section class="tarjeta">
+        <h3>1. Tu token personal</h3>
+        <p>${t ? `Creado el ${fechaCorta(t.creado_en.slice(0, 10))}${t.ultimo_uso ? ` · último envío: ${new Date(t.ultimo_uso).toLocaleString("es", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : " · aún sin envíos"}.` : "Todavía no tienes token."}</p>
+        <div id="sl-token"></div>
+        <button type="button" class="${t ? "secundario" : "boton-principal"}" id="sl-gen">${t ? "Generar uno nuevo (anula el anterior)" : "Generar token"}</button>
+      </section>
+      <section class="tarjeta">
+        <h3>2. Dirección a la que envía el Atajo</h3>
+        <p class="codigo">${esc(url)}</p>
+        <button type="button" class="secundario" data-copiar="${esc(url)}">Copiar dirección</button>
+      </section>
+      <section class="tarjeta">
+        <h3>3. Crear el Atajo</h3>
+        <p>Sigue las instrucciones del chat paso a paso. Cuando funcione, aquí aparecerá la fecha del último envío.</p>
+      </section>`;
+    $("sl-gen").addEventListener("click", async () => {
+      if (t && !confirm("El token anterior dejará de funcionar y tendrás que pegar el nuevo en el Atajo. ¿Continuar?")) return;
+      const r = await db.rpc("generar_token_salud");
+      if (r.error) return avisar(errorLegible(r.error));
+      $("sl-token").innerHTML = `<p class="aviso">Cópialo ahora y pégalo en el Atajo: no se volverá a mostrar.</p><p class="codigo">${esc(r.data)}</p>
+        <button type="button" class="boton-principal" data-copiar="${esc(r.data)}">Copiar token</button>`;
+    });
+  }
+  $("vista").addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-copiar]");
+    if (c) { try { await navigator.clipboard.writeText(c.dataset.copiar); avisar("Copiado.", "ok"); } catch (_) { avisar("No se pudo copiar: mantén pulsado el texto para copiarlo."); } }
+  });
+
+  // ---------- Acciones de la pestaña Hábitos
+  $("vista").addEventListener("click", async (e) => {
+    const de = e.target.closest("[data-hab-de]");
+    if (de) { habitosDe = de.dataset.habDe; return vistaHabitos(); }
+    const h = e.target.closest("[data-hab]");
+    if (h) {
+      const a = h.dataset.hab;
+      if (a === "sueno") return hojaSueno();
+      if (a === "alcohol") return hojaAlcohol();
+      if (a === "ciclo-inicio") return hojaCiclo();
+      if (a === "ciclo-sintomas") { const { data } = await db.from("ciclo").select("sintomas").eq("id", Number(h.dataset.id)).single(); return hojaCiclo(Number(h.dataset.id), data?.sintomas || []); }
+      if (a === "ciclo-fin") { await db.from("ciclo").update({ fin: yo().hoy }).eq("id", Number(h.dataset.id)); avisar("Registrado.", "ok"); return vistaHabitos(); }
+      if (a === "dolor") return hojaDolor();
+      if (a === "episodio") return hojaEpisodio();
+      if (a === "inbody") return hojaInbody();
+      if (a === "foto") return hojaFotoProgreso();
+      if (a === "fotos") return hojaVerFotos();
+      if (a === "coach-lesion") return vistaCoach("lesion");
+      if (a === "coach-episodio") return vistaCoach("episodio");
+    }
+    const ba = e.target.closest("[data-borrar-alc]");
+    if (ba) { await db.from("alcohol").delete().eq("id", Number(ba.dataset.borrarAlc)); return vistaHabitos(); }
   });
 
   // ================================================================ SENSACIÓN DE APP NATIVA

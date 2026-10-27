@@ -408,3 +408,14 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
   .vista { padding: 0 !important; max-width: none; }
   .tarjeta { break-inside: avoid; }
 }
+
+/* ===================== Fase 10: hábitos ===================== */
+.semana-sueno { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 6px; margin-top: 12px; text-align: center; }
+.semana-sueno span { background: var(--fondo); border-radius: 10px; padding: 6px 0; display: grid; }
+.semana-sueno small { color: var(--texto-suave); font-size: .72rem; text-transform: uppercase; }
+.semana-sueno strong { font-size: .92rem; }
+.codigo { font-family: ui-monospace, Menlo, monospace; font-size: .82rem; word-break: break-all; background: var(--fondo); padding: 10px 12px; border-radius: 10px; color: var(--texto) !important; }
+.comparar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.comparar figure { margin: 0; }
+.comparar img { width: 100%; border-radius: 12px; aspect-ratio: 3/4; object-fit: cover; }
+.comparar figcaption { text-align: center; font-size: .82rem; color: var(--texto-suave); margin-top: 4px; }
