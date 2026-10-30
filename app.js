@@ -217,6 +217,7 @@
     const zonaTxt = nombreZona(p.zona);
     return `
       <section class="tarjeta ${tema}">
+        <div class="masc-tarjeta" data-masc="${p.id}"></div>
         <h3 class="nombre-${tema}">${nombre}${esYo ? " (tú)" : ""}</h3>
         <p>${meta ? `${Math.min(hechos.length, metaEf)} de ${metaEf} días con entrenamiento esta semana${metaEf < meta.entrenos_semana ? ` <small>(meta ${meta.entrenos_semana}, ${meta.entrenos_semana - metaEf} excusado${meta.entrenos_semana - metaEf === 1 ? "" : "s"})</small>` : ""}` : "Todavía sin metas del mes"}</p>
         <div class="dias">${dias}</div>
@@ -267,6 +268,7 @@
       <div id="inicio-pendientes"></div>
       ${tarjetaJuntos()}`;
     cargarPendientesJuntos($("inicio-pendientes"));
+    pintarMascotasInicio();
     cargarPorResponder($("por-responder-inicio"));
     tarjetaMensajes($("inicio-mensajes"));
     tarjetaRecompensas($("inicio-recompensas"));
@@ -422,6 +424,12 @@
         ${esPrimeraVez ? `<p class="privado" style="margin:-6px 0 20px">🔒 El peso es privado: solo tú lo ves.</p>` : ""}
         <div class="campo"><label for="pf-objetivo">Tu objetivo físico</label>
           <textarea id="pf-objetivo" maxlength="300" placeholder="Con tus palabras: qué quieres lograr">${v(perfil.objetivo_fisico)}</textarea></div>
+        ${esPrimeraVez ? "" : `<span class="grupo-titulo">Tu mascota</span>
+        <div class="opciones campo">
+          <label><input type="radio" name="pf-masc" value="salchicha" ${(perfil.mascota || (perfil.tema === "azul" ? "chihuahua" : "salchicha")) === "salchicha" ? "checked" : ""}><span>🐕 Salchicha</span></label>
+          <label><input type="radio" name="pf-masc" value="chihuahua" ${(perfil.mascota || (perfil.tema === "azul" ? "chihuahua" : "salchicha")) === "chihuahua" ? "checked" : ""}><span>🐶 Chihuahua</span></label>
+        </div>
+        <div class="campo"><label for="pf-masc-nombre">Nombre de tu mascota</label><input id="pf-masc-nombre" maxlength="30" value="${v(perfil.mascota_nombre)}" placeholder="Como tu perro"></div>`}
         <span class="grupo-titulo">Tu color en la app</span>
         <div class="opciones campo">
           <label class="op-rosa"><input type="radio" name="pf-tema" value="rosa" ${temaDefecto === "rosa" ? "checked" : ""}><span>Rosa</span></label>
@@ -453,6 +461,8 @@
       };
       if ($("pf-macros")) datos.compartir_macros = $("pf-macros").checked;
       if ($("pf-coach")) datos.coach_activo = $("pf-coach").checked;
+      const masc = document.querySelector('input[name="pf-masc"]:checked');
+      if (masc) { datos.mascota = masc.value; datos.mascota_nombre = $("pf-masc-nombre").value.trim() || null; }
       const peso = esPrimeraVez ? Number($("pf-peso").value) : null;
       if (!datos.nombre || !datos.fecha_nacimiento || !datos.sexo || !datos.estatura_cm || !datos.tema)
         return avisar("Completa nombre, fecha de nacimiento, sexo, estatura y color.");
@@ -3571,9 +3581,10 @@
     const borradores = esMio ? (await db.from("entrenos").select("id").eq("user_id", usuario.id).eq("origen", "salud").eq("estado", "borrador")).data || [] : [];
     const muestraCiclo = (esMio ? perfil.sexo === "femenino" : false) || (cic.data || []).length > 0;
 
-    const htmlBienestar = esMio ? await tarjetaBienestar() : "";
+    const [htmlBienestar, htmlMascota] = await Promise.all([esMio ? tarjetaBienestar() : "", tarjetaMascota(quien.id)]);
     if (vistaActual !== "habitos") return;
     $("hab").innerHTML = `
+      ${htmlMascota}
       ${htmlBienestar}
       <section class="tarjeta">
         <div class="nutri-cab"><h3 style="margin:0">😴 Sueño</h3>${esMio ? `<button type="button" class="enlace" data-hab="sueno" style="width:auto;min-height:0;padding:0">+ Registrar</button>` : ""}</div>
@@ -4108,6 +4119,153 @@
     const ba = e.target.closest("[data-borrar-alc]");
     if (ba) { await db.from("alcohol").delete().eq("id", Number(ba.dataset.borrarAlc)); return vistaHabitos(); }
   });
+
+  // ================================================================ MASCOTAS (fase 11)
+  // Dibujo por capas en SVG: cuerpo (5 niveles), expresión y accesorios.
+  function svgMascota(tipo, nivel = 3, expresion = "normal", accesorios = [], tam = 200) {
+    const n = Math.max(1, Math.min(5, nivel));
+    const t = (n - 1) / 4;                       // 0 = nivel 1, 1 = nivel 5
+    const L = (a, b) => a + (b - a) * t;
+    const ojos = (x1, y1, x2, y2, r) => {
+      const ojo = (x, y) => {
+        if (expresion === "feliz") return `<path d="M${x - r} ${y + 1} Q${x} ${y - r * 1.4} ${x + r} ${y + 1}" fill="none" stroke="#2E2926" stroke-width="2.6" stroke-linecap="round"/>`;
+        if (expresion === "cansada") return `<path d="M${x - r} ${y} L${x + r} ${y}" stroke="#2E2926" stroke-width="2.6" stroke-linecap="round"/><path d="M${x - r * .9} ${y + r * .9} Q${x} ${y + r * 1.6} ${x + r * .9} ${y + r * .9}" fill="none" stroke="#9C7B8A" stroke-width="1.6" opacity=".7"/>`;
+        if (expresion === "triste") return `<circle cx="${x}" cy="${y + 1}" r="${r * .75}" fill="#2E2926"/><path d="M${x - r * 1.1} ${y - r * 1.2} L${x + r * .6} ${y - r * .5}" stroke="#2E2926" stroke-width="2" stroke-linecap="round"/>`;
+        if (expresion === "energica") return `<circle cx="${x}" cy="${y}" r="${r}" fill="#2E2926"/><circle cx="${x + r * .35}" cy="${y - r * .4}" r="${r * .38}" fill="#fff"/><circle cx="${x - r * .35}" cy="${y + r * .3}" r="${r * .18}" fill="#fff"/>`;
+        return `<circle cx="${x}" cy="${y}" r="${r * .85}" fill="#2E2926"/><circle cx="${x + r * .3}" cy="${y - r * .3}" r="${r * .3}" fill="#fff"/>`;
+      };
+      return ojo(x1, y1) + (x2 != null ? ojo(x2, y2) : "");
+    };
+    const boca = (x, y, w) => {
+      if (expresion === "feliz" || expresion === "energica") return `<path d="M${x - w} ${y} Q${x} ${y + w * 1.3} ${x + w} ${y}" fill="#C9576F" stroke="#2E2926" stroke-width="2" stroke-linejoin="round"/>`;
+      if (expresion === "triste") return `<path d="M${x - w * .8} ${y + w * .6} Q${x} ${y - w * .3} ${x + w * .8} ${y + w * .6}" fill="none" stroke="#2E2926" stroke-width="2" stroke-linecap="round"/>`;
+      if (expresion === "cansada") return `<path d="M${x - w * .6} ${y + 2} L${x + w * .6} ${y + 2}" stroke="#2E2926" stroke-width="2" stroke-linecap="round"/>`;
+      return `<path d="M${x - w * .7} ${y} Q${x} ${y + w * .7} ${x + w * .7} ${y}" fill="none" stroke="#2E2926" stroke-width="2" stroke-linecap="round"/>`;
+    };
+    const zzz = expresion === "cansada" ? `<text x="168" y="34" font-size="16" font-weight="700" fill="#9C7B8A" class="m-zzz">z</text><text x="180" y="22" font-size="12" font-weight="700" fill="#9C7B8A" class="m-zzz">z</text>` : "";
+    const lagrima = expresion === "triste" ? `<path d="M0 0 q3 6 0 9 q-3 -3 0 -9z" fill="#86ADD8" class="m-lagrima"/>` : "";
+    let cuerpo = "", cabeza = {};
+    if (tipo === "chihuahua") {
+      // Chihuahua: nivel alto = más fuerte (pecho y patas más gruesos); nivel bajo = más delgado
+      const rx = L(28, 38), ry = L(17, 25), pata = L(6, 11), cx = 92, cy = 104;
+      const c = "#FBF8F5", borde = "#D8CCC4", gris = "#5F5A5C", grisC = "#8D8789", rosa = "#E9C3C6";
+      cuerpo = `
+        <g class="m-cola" style="transform-origin:${cx - rx + 4}px ${cy - 6}px"><path d="M${cx - rx + 4} ${cy - 6} q-22 -6 -16 -30 q4 14 18 20z" fill="${c}" stroke="${borde}" stroke-width="1.5"/></g>
+        ${[cx - rx * .65, cx - rx * .25, cx + rx * .3, cx + rx * .7].map((x) => `<rect x="${x - pata / 2}" y="${cy + ry * .5}" width="${pata}" height="${L(30, 26)}" rx="${pata / 2}" fill="${c}" stroke="${borde}" stroke-width="1.5"/>`).join("")}
+        <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${c}" stroke="${borde}" stroke-width="1.5"/>
+        <ellipse cx="${cx - rx * .35}" cy="${cy + ry * .35}" rx="${rx * .22}" ry="${ry * .25}" fill="${grisC}" opacity=".35"/>
+        <ellipse cx="${cx + rx * .45}" cy="${cy + 2}" rx="${L(12, 18)}" ry="${L(11, 17)}" fill="#F3E4E2" opacity=".8"/>
+        ${n >= 4 ? `<path d="M${cx + rx * .2} ${cy - ry * .2} q8 6 0 14" fill="none" stroke="${borde}" stroke-width="1.6"/>` : ""}`;
+      const hx = 138, hy = 70;
+      cabeza = { hx, hy };
+      cuerpo += `
+        <path d="M${hx - 18} ${hy - 20} Q${hx - 40} ${hy - 34} ${hx - 52} ${hy - 26} Q${hx - 44} ${hy - 6} ${hx - 16} ${hy + 2}z" fill="${gris}"/><path d="M${hx - 20} ${hy - 15} Q${hx - 38} ${hy - 26} ${hx - 44} ${hy - 22} Q${hx - 38} ${hy - 9} ${hx - 19} ${hy - 3}z" fill="${rosa}" opacity=".8"/>
+        <path d="M${hx + 18} ${hy - 20} Q${hx + 40} ${hy - 34} ${hx + 52} ${hy - 26} Q${hx + 44} ${hy - 6} ${hx + 16} ${hy + 2}z" fill="${gris}"/><path d="M${hx + 20} ${hy - 15} Q${hx + 38} ${hy - 26} ${hx + 44} ${hy - 22} Q${hx + 38} ${hy - 9} ${hx + 19} ${hy - 3}z" fill="${rosa}" opacity=".8"/>
+        <ellipse cx="${hx}" cy="${hy}" rx="26" ry="27" fill="${c}" stroke="${borde}" stroke-width="1.5"/>
+        <path d="M${hx - 22} ${hy + 1} Q${hx - 22} ${hy - 19} ${hx - 4} ${hy - 18} Q${hx - 3} ${hy - 14} ${hx - 6} ${hy - 12} Q${hx - 18} ${hy - 13} ${hx - 18} ${hy + 1}z" fill="${gris}"/>
+        <path d="M${hx + 22} ${hy + 1} Q${hx + 22} ${hy - 19} ${hx + 4} ${hy - 18} Q${hx + 3} ${hy - 14} ${hx + 6} ${hy - 12} Q${hx + 18} ${hy - 13} ${hx + 18} ${hy + 1}z" fill="${gris}"/>
+        <circle cx="${hx - 11}" cy="${hy - 3}" r="7.5" fill="none" stroke="${grisC}" stroke-width="1.6" opacity=".55"/>
+        <circle cx="${hx + 11}" cy="${hy - 3}" r="7.5" fill="none" stroke="${grisC}" stroke-width="1.6" opacity=".55"/>
+        <ellipse cx="${hx}" cy="${hy + 14}" rx="10" ry="8" fill="#F1E9E6"/>
+        <path d="M${hx - 8} ${hy + 17} Q${hx} ${hy + 25} ${hx + 8} ${hy + 17} Q${hx} ${hy + 21} ${hx - 8} ${hy + 17}z" fill="${gris}" opacity=".85"/>
+        <ellipse cx="${hx}" cy="${hy + 10}" rx="5.5" ry="4.2" fill="#232022"/>
+        <path d="M${hx - 20} ${hy + 22} Q${hx} ${hy + 31} ${hx + 20} ${hy + 22}" fill="none" stroke="#5B8FC7" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="${hx}" cy="${hy + 30}" r="3.5" fill="#F2C94C"/>
+        ${ojos(hx - 11, hy - 3, hx + 11, hy - 3, 5.2)}
+        ${boca(hx, hy + 20, 4)}
+        <circle cx="${hx - 17}" cy="${hy + 9}" r="3.5" fill="${rosa}" opacity=".6"/><circle cx="${hx + 17}" cy="${hy + 9}" r="3.5" fill="${rosa}" opacity=".6"/>`;
+    } else {
+      // Salchicha: nivel alto = más estilizada; nivel bajo = más pesada
+      const rx = L(66, 56), ry = L(31, 21), cx = 98, cy = 102;
+      const c = "#A9532B", cO = "#73331A", claro = "#BC6A3C";
+      cuerpo = `
+        <g class="m-cola" style="transform-origin:${cx - rx + 6}px ${cy - 6}px"><path d="M${cx - rx + 6} ${cy - 6} q-24 -4 -26 -22 q10 12 28 12z" fill="${cO}"/></g>
+        ${[cx - rx * .7, cx - rx * .45, cx + rx * .45, cx + rx * .7].map((x, i) => `<rect x="${x - 6.5}" y="${cy + ry * .55}" width="13" height="${L(16, 20)}" rx="6.5" fill="${i % 2 ? c : cO}"/>`).join("")}
+        <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${c}"/>
+        <ellipse cx="${cx + 6}" cy="${cy + ry * .5}" rx="${rx * .7}" ry="${ry * .38}" fill="${claro}"/>
+        <path d="M${cx - rx * .6} ${cy - ry * .75} Q${cx} ${cy - ry * 1.05} ${cx + rx * .6} ${cy - ry * .75}" fill="none" stroke="${cO}" stroke-width="3" opacity=".25" stroke-linecap="round"/>`;
+      const hx = 158, hy = 74;
+      cabeza = { hx, hy };
+      cuerpo += `
+        <circle cx="${hx}" cy="${hy}" r="23" fill="${c}"/>
+        <ellipse cx="${hx + 22}" cy="${hy + 9}" rx="18" ry="11" fill="${c}"/>
+        <ellipse cx="${hx + 26}" cy="${hy + 13}" rx="13" ry="6" fill="#8F7E77" opacity=".75"/>
+        <ellipse cx="${hx + 30}" cy="${hy + 6}" rx="9" ry="5" fill="#5A3A2E" opacity=".35"/>
+        <ellipse cx="${hx + 39}" cy="${hy + 5}" rx="5.5" ry="4.5" fill="#1F1B1A"/>
+        <path d="M${hx - 26} ${hy + 18} Q${hx - 6} ${hy + 30} ${hx + 10} ${hy + 20}" fill="none" stroke="#E07A99" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="${hx - 6}" cy="${hy + 27}" r="3.5" fill="#F2C94C"/>
+        <g class="m-oreja" style="transform-origin:${hx - 8}px ${hy - 14}px"><path d="M${hx - 6} ${hy - 17} q-26 2 -22 38 q8 6 14 -2 q10 -14 8 -36z" fill="${cO}"/></g>
+        ${ojos(hx + 6, hy - 4, null, null, 4.6)}
+        ${boca(hx + 24, hy + 18, 5)}
+        <circle cx="${hx + 14}" cy="${hy + 8}" r="4" fill="#F1B7C4" opacity=".55"/>`;
+    }
+    const { hx, hy } = cabeza;
+    const acc = {
+      banda: `<path d="M${hx - 24} ${hy - 12} Q${hx} ${hy - 24} ${hx + 24} ${hy - 12}" fill="none" stroke="${tipo === "chihuahua" ? "#5B8FC7" : "#E07A99"}" stroke-width="7" stroke-linecap="round"/>`,
+      gorro: `<path d="M${hx - 20} ${hy - 16} Q${hx} ${hy - 50} ${hx + 26} ${hy - 30} L${hx + 16} ${hy - 14}z" fill="#86ADD8"/><circle cx="${hx + 28}" cy="${hy - 30}" r="5" fill="#fff"/><path d="M${hx - 22} ${hy - 15} Q${hx} ${hy - 24} ${hx + 18} ${hy - 13}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>`,
+      corazon: `<path class="m-corazon" d="M30 36 c-6 -8 -18 -2 -12 8 l12 12 l12 -12 c6 -10 -6 -16 -12 -8z" fill="#E07A99"/>`,
+      trofeo: `<g transform="translate(18 112)"><rect x="6" y="22" width="16" height="5" rx="2" fill="#C9A227"/><rect x="11" y="16" width="6" height="7" fill="#C9A227"/><path d="M2 0 h24 v6 a12 12 0 0 1 -24 0z" fill="#F2C94C"/></g>`,
+      venda: `<rect x="${tipo === "chihuahua" ? 108 : 132}" y="${tipo === "chihuahua" ? 122 : 120}" width="${tipo === "chihuahua" ? 14 : 16}" height="7" rx="2" fill="#fff" stroke="#E3D6CF"/>`,
+      gota: `<path d="M184 108 q6 9 0 13 q-6 -4 0 -13z" fill="#86ADD8"/>`
+    };
+    const capas = accesorios.filter((a) => acc[a]).map((a) => acc[a]).join("");
+    return `<svg class="mascota m-${expresion}" viewBox="0 0 210 160" width="${tam}" height="${tam * 160 / 210}" role="img" aria-label="Mascota">
+      <ellipse cx="105" cy="150" rx="72" ry="6" fill="#2E2926" opacity=".08"/>
+      <g class="m-cuerpo">${cuerpo}${capas}</g>${zzz}
+      ${lagrima ? `<g transform="translate(${tipo === "chihuahua" ? hx - 12 : hx + 2} ${hy + 4})">${lagrima}</g>` : ""}
+    </svg>`;
+  }
+
+  const NIVEL_TXT = { 1: "Necesita cariño", 2: "Con poca energía", 3: "Estable", 4: "En forma", 5: "¡Radiante!" };
+  const COMP_TXT = { ejercicio: "🏋️ Ejercicio", nutricion: "🎯 Objetivos de nutrición", saludable: "🥗 Alimentación saludable", sueno: "😴 Sueño", alcohol: "🍷 Alcohol" };
+  let cacheMascotas = null;
+  async function cargarMascotas() {
+    const { data, error } = await db.rpc("mascotas");
+    if (!error) cacheMascotas = data;
+    return cacheMascotas;
+  }
+  const nombreMascota = (m) => m.mascota_nombre || (m.tipo === "chihuahua" ? "Tu chihuahua" : "Tu salchicha");
+
+  // Mascotas pequeñas en las tarjetas de Inicio
+  async function pintarMascotasInicio() {
+    const lista = await cargarMascotas();
+    for (const m of lista || []) {
+      const el = document.querySelector(`[data-masc="${m.user_id}"]`);
+      if (el) el.innerHTML = svgMascota(m.tipo, m.nivel, m.expresion, m.accesorios, 96) +
+        `<span class="masc-nota">${m.puntaje != null ? Math.round(m.puntaje) : "—"}<small>/100</small></span>`;
+    }
+  }
+
+  // Tarjeta grande en Hábitos
+  async function tarjetaMascota(quienId) {
+    const [lista, hist] = await Promise.all([cargarMascotas(), db.rpc("historial_habitos", { p_user: quienId, p_dias: 14 })]);
+    const m = (lista || []).find((x) => x.user_id === quienId);
+    if (!m) return "";
+    const esMia = quienId === usuario.id;
+    const det = m.detalle;
+    const comps = det?.componentes || {};
+    const filas = Object.entries(COMP_TXT).map(([k, t]) => {
+      const c = comps[k];
+      if (!c) return `<div class="nutri-cab" style="padding:5px 0"><span>${t}</span><strong class="ayuda" style="margin:0">pendiente</strong></div>`;
+      return `<div class="nutri-fila" style="padding:5px 0"><div class="nutri-cab"><span>${t}</span><strong>${r1(c.frac * c.peso)} / ${c.peso}</strong></div>
+        <div class="progreso"><span style="width:${c.frac * 100}%"></span></div></div>`;
+    }).join("");
+    const serie = hist.data || [];
+    const barras = serie.length ? `<div class="barras-hab">${serie.map((h) => `<span title="${h.fecha}"><i style="height:${Math.max(4, h.puntaje || 0)}%"></i><small>${fmt(h.fecha, { weekday: "narrow" })}</small></span>`).join("")}</div>` : "";
+    return `
+      <section class="tarjeta tarjeta-mascota ${m.tema || ""}">
+        <div class="mascota-grande">${svgMascota(m.tipo, m.nivel, m.expresion, m.accesorios, 240)}</div>
+        <h3 style="text-align:center;margin-top:4px">${esc(nombreMascota(m))} · ${NIVEL_TXT[m.nivel]}</h3>
+        <p style="text-align:center">Puntuación de hábitos ${m.fuente === "ayer" ? "(de ayer: hoy aún no hay registros)" : "de hoy"}: <strong>${m.puntaje != null ? Math.round(m.puntaje) : "—"}/100</strong></p>
+        ${det ? `<details class="historial"><summary>Cómo se calcula hoy</summary>${filas}
+          ${det.bono ? `<p class="ayuda">Bonos: +${r1(det.bono)} (comidas juntos, entrenamiento extra o pasos)</p>` : ""}
+          ${det.resta ? `<p class="ayuda">Regla de cantidad de comidas: −${r1(det.resta)}</p>` : ""}
+          ${det.dia_libre ? `<p class="ayuda">🎉 Día libre: solo suma lo que cumples.</p>` : ""}
+          <p class="ayuda">Lo pendiente no resta hasta que termina el día. Los registros personales nunca afectan la puntuación.</p></details>` : ""}
+        ${barras}
+        ${esMia ? `<p class="ayuda" style="text-align:center">La mascota es una motivación, no un diagnóstico de salud.</p>` : ""}
+      </section>`;
+  }
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>

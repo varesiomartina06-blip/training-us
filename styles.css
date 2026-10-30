@@ -434,3 +434,35 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .niveles button span { font-size: 1.7rem; }
 .niveles button[aria-pressed="true"] { border-color: var(--acento); background: var(--acento-suave); }
 .item.preparada { border-style: dashed; }
+
+/* ===================== Fase 11: mascotas ===================== */
+.masc-tarjeta { float: right; margin: -6px -4px 0 8px; text-align: center; }
+.masc-tarjeta:empty { display: none; }
+.masc-nota { display: block; font-weight: 700; font-size: .95rem; margin-top: -6px; }
+.masc-nota small { font-weight: 500; color: var(--texto-suave); font-size: .7rem; }
+.tarjeta-mascota { text-align: center; }
+.tarjeta-mascota.rosa { background: linear-gradient(180deg, var(--rosa-suave), var(--superficie) 60%); }
+.tarjeta-mascota.azul { background: linear-gradient(180deg, var(--azul-suave), var(--superficie) 60%); }
+.tarjeta-mascota details { text-align: left; }
+.mascota-grande { display: flex; justify-content: center; }
+.mascota { overflow: visible; }
+.barras-hab { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; height: 70px; align-items: end; margin-top: 14px; }
+.barras-hab span { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.barras-hab i { display: block; width: 100%; max-width: 18px; background: var(--acento); border-radius: 6px 6px 2px 2px; opacity: .8; }
+.barras-hab small { font-size: .65rem; color: var(--texto-suave); margin-top: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .m-cola { animation: m-cola 1.4s ease-in-out infinite; }
+  .m-energica .m-cola { animation-duration: .5s; }
+  .m-triste .m-cola, .m-cansada .m-cola { animation: none; }
+  .m-cuerpo { animation: m-respira 3.2s ease-in-out infinite; transform-origin: 105px 150px; }
+  .m-energica .m-cuerpo { animation: m-salto 1s ease-in-out infinite; }
+  .m-oreja { animation: m-oreja 3.2s ease-in-out infinite; }
+  .m-zzz { animation: m-zzz 2.4s ease-in-out infinite; }
+  .m-corazon { animation: m-corazon 1.6s ease-in-out infinite; transform-origin: 30px 46px; }
+}
+@keyframes m-cola { 50% { transform: rotate(14deg); } }
+@keyframes m-respira { 50% { transform: scale(1.015, .985); } }
+@keyframes m-salto { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-6px); } }
+@keyframes m-oreja { 50% { transform: rotate(-5deg); } }
+@keyframes m-zzz { 0% { opacity: 0; transform: translateY(4px); } 50% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+@keyframes m-corazon { 50% { transform: scale(1.15); } }
