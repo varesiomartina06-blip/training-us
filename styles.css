@@ -466,3 +466,20 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 @keyframes m-oreja { 50% { transform: rotate(-5deg); } }
 @keyframes m-zzz { 0% { opacity: 0; transform: translateY(4px); } 50% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
 @keyframes m-corazon { 50% { transform: scale(1.15); } }
+
+/* ===================== Fase 12: estadísticas y coach ===================== */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; margin-top: 10px; }
+.stat { background: var(--fondo); border-radius: 12px; padding: 8px 10px; display: grid; gap: 2px; }
+.stat span { font-size: .74rem; color: var(--texto-suave); }
+.stat strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.stat small { font-size: .7rem; color: var(--texto-suave); }
+.stat-persona { margin-top: 12px; }
+.stat-persona > span { font-weight: 700; font-size: .9rem; }
+.nombre-rosa { color: #B5607A; } .nombre-azul { color: #5B8FC7; }
+.barras-lista { display: grid; gap: 6px; margin-top: 6px; }
+.barras-lista div { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr) 28px; gap: 8px; align-items: center; font-size: .86rem; }
+.barras-lista i { display: block; height: 10px; border-radius: 5px; background: var(--acento); opacity: .75; }
+.barras-lista strong { text-align: right; font-variant-numeric: tabular-nums; }
+.tarjeta.accion-dia { border-color: var(--acento); }
+.sugerencia { background: var(--fondo); border-radius: 12px; padding: 10px 12px; margin-top: 10px; font-size: .92rem; line-height: 1.45; }
+.sugerencia.subir { background: #FFF4D9; }

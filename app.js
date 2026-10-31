@@ -169,7 +169,7 @@
     if (v === "receta-editor") v = "recetas";
     if (v === "reporte") v = "exportar";
     vistaActual = v;
-    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil", "coach", "exportar", "metas"].includes(v) ? "mas"
+    const pestana = ["multas", "recompensas", "mensajes", "ausencias", "perfil", "coach", "exportar", "metas", "estadisticas", "aprende"].includes(v) ? "mas"
       : ["recetas", "checkin"].includes(v) ? "comida" : ["salud"].includes(v) ? "habitos" : v;
     document.querySelectorAll("#pestanas button").forEach((b) => {
       if (b.dataset.vista === pestana) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
@@ -187,6 +187,8 @@
     else if (v === "mas") vistaMas();
     else if (v === "coach") vistaCoach("general");
     else if (v === "habitos") vistaHabitos();
+    else if (v === "estadisticas") vistaEstadisticas();
+    else if (v === "aprende") vistaAprende();
     else if (v === "salud") vistaSalud();
     else if (v === "recetas") vistaRecetas();
     else if (v === "checkin") vistaCheckin();
@@ -265,10 +267,12 @@
       <div id="marcador"><section class="tarjeta"><p class="vacio">Cargando marcador…</p></section></div>
       ${tarjetaParticipante(yo(), true)}
       ${p ? tarjetaParticipante(p, false) : ""}
+      <div id="accion-dia"></div>
       <div id="inicio-pendientes"></div>
       ${tarjetaJuntos()}`;
     cargarPendientesJuntos($("inicio-pendientes"));
     pintarMascotasInicio();
+    cargarAccionDia();
     cargarPorResponder($("por-responder-inicio"));
     tarjetaMensajes($("inicio-mensajes"));
     tarjetaRecompensas($("inicio-recompensas"));
@@ -2875,7 +2879,7 @@
     $("vista").innerHTML = `
       <h2 class="titulo">Más</h2>
       <div class="lista">
-        ${[["metas", "🎯", "Metas y retos"], ["coach", "🤖", "Coach"], ["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
+        ${[["estadisticas", "📊", "Estadísticas"], ["metas", "🎯", "Metas y retos"], ["coach", "🤖", "Coach"], ["aprende", "📚", "Aprende"], ["multas", "💰", "Multas y pagos"], ["recompensas", "🎁", "Recompensas"], ["mensajes", "💬", "Mensajes"],
            ["ausencias", "📝", "Ausencias y cupos"], ["exportar", "📤", "Exportar datos y reporte"], ["perfil", "👤", "Perfil y notificaciones"]].map(([v, e, n]) => `
           <button type="button" class="item" data-ir="${v}" style="min-height:64px"><span class="mini">${e}</span><span><strong>${n}</strong></span><span class="lado">›</span></button>`).join("")}
       </div>`;
@@ -4266,6 +4270,214 @@
         ${esMia ? `<p class="ayuda" style="text-align:center">La mascota es una motivación, no un diagnóstico de salud.</p>` : ""}
       </section>`;
   }
+
+  // ================================================================ ESTADÍSTICAS Y COACH AVANZADO (fase 12)
+  // ---------- Gráficos simples en SVG
+  function grafico(series, etiquetas, { tipo = "linea", unidad = "", alto = 150, min = null, max = null } = {}) {
+    const W = 340, H = alto, pl = 34, pr = 8, pt = 10, pb = 22;
+    const vals = series.flatMap((s) => s.valores).filter((v) => v != null && isFinite(v));
+    if (!vals.length) return `<p class="ayuda">Sin datos en este periodo.</p>`;
+    let lo = min ?? Math.min(0, ...vals), hi = max ?? Math.max(...vals);
+    if (hi === lo) hi = lo + 1;
+    if (min == null && tipo === "linea") { const pad = (hi - Math.min(...vals)) * .15; lo = Math.max(0, Math.min(...vals) - pad); }
+    const n = etiquetas.length, paso = (W - pl - pr) / Math.max(1, n - (tipo === "linea" ? 1 : 0));
+    const X = (i) => pl + (tipo === "linea" ? i * paso : i * paso + paso / 2);
+    const Y = (v) => pt + (1 - (v - lo) / (hi - lo)) * (H - pt - pb);
+    const marcas = [lo, (lo + hi) / 2, hi].map((v) => `<text x="${pl - 4}" y="${Y(v) + 3}" font-size="9" text-anchor="end" fill="var(--texto-suave)">${Math.round(v)}</text>
+      <line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--borde)" stroke-width="1"/>`).join("");
+    const cada = Math.ceil(n / 7);
+    const ejeX = etiquetas.map((e, i) => i % cada === 0 || i === n - 1 ? `<text x="${X(i)}" y="${H - 6}" font-size="9" text-anchor="middle" fill="var(--texto-suave)">${esc(e)}</text>` : "").join("");
+    let cuerpo = "";
+    if (tipo === "barras") {
+      const ancho = Math.max(3, paso / series.length * .7);
+      series.forEach((s, k) => s.valores.forEach((v, i) => {
+        if (v == null) return;
+        const x = X(i) - (ancho * series.length) / 2 + k * ancho;
+        cuerpo += `<rect x="${x}" y="${Y(Math.max(v, lo))}" width="${ancho - 1}" height="${Math.max(0, Y(lo) - Y(Math.max(v, lo)))}" rx="2" fill="${s.color}"/>`;
+      }));
+    } else {
+      series.forEach((s) => {
+        const pts = s.valores.map((v, i) => (v == null ? null : `${X(i)},${Y(v)}`));
+        let tramo = [], d = "";
+        pts.forEach((p) => { if (p) tramo.push(p); else { if (tramo.length) d += "M" + tramo.join(" L"); tramo = []; } });
+        if (tramo.length) d += "M" + tramo.join(" L");
+        cuerpo += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" ${s.punteada ? 'stroke-dasharray="5 4"' : ""}/>`;
+        cuerpo += s.valores.map((v, i) => (v == null ? "" : `<circle cx="${X(i)}" cy="${Y(v)}" r="${n > 40 ? 1.5 : 2.6}" fill="${s.color}"/>`)).join("");
+      });
+    }
+    const leyenda = series.length > 1 ? `<div class="leyenda">${series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.nombre)}</span>`).join("")}</div>` : "";
+    return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="Gráfico">${marcas}${cuerpo}${ejeX}</svg>${leyenda}${unidad ? `<p class="ayuda" style="margin-top:2px">${unidad}</p>` : ""}`;
+  }
+
+  // ---------- Agrupación por día, semana o mes
+  function agrupar(dias, grano) {
+    const clave = (f) => grano === "dia" ? f : grano === "semana" ? lunesDe(f) : f.slice(0, 7) + "-01";
+    const grupos = new Map();
+    for (const d of dias) { const k = clave(d.fecha); if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(d); }
+    return [...grupos.entries()].map(([k, l]) => ({ clave: k, dias: l }));
+  }
+  const lunesDe = (f) => { const d = aFecha(f); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+  const suma = (l, k) => l.reduce((a, d) => a + (Number(d[k]) || 0), 0);
+  const media = (l, k, filtro = (d) => d[k] != null) => { const x = l.filter(filtro); return x.length ? x.reduce((a, d) => a + Number(d[k]), 0) / x.length : null; };
+  const etiquetaGrupo = (k, grano) => grano === "dia" ? fmt(k, { day: "numeric" }) : grano === "semana" ? fmt(k, { day: "numeric", month: "short" }) : fmt(k, { month: "short" });
+
+  let estFiltro = { periodo: 30, quien: "yo" };
+  const TIPO_NOMBRE = (t) => (TIPO[t] ? TIPO[t].emoji + " " + TIPO[t].nombre : t);
+  const ANIMO_NOMBRE = Object.fromEntries((typeof ANIMOS !== "undefined" ? ANIMOS : []).map(([k, e, n]) => [k, e + " " + n]));
+
+  async function vistaEstadisticas() {
+    vistaActual = "estadisticas";
+    const y = yo(), p = pareja();
+    const hasta = y.hoy, desde = sumarDias(hasta, -(estFiltro.periodo - 1));
+    const grano = estFiltro.periodo <= 31 ? "dia" : estFiltro.periodo <= 120 ? "semana" : "mes";
+    $("vista").innerHTML = `
+      <div class="cabecera-vista"><h2 class="titulo">📊 Estadísticas</h2><button type="button" data-ir="mas">Volver</button></div>
+      <div class="segmentado" id="es-quien">
+        <button type="button" data-q="yo" aria-pressed="${estFiltro.quien === "yo"}">Mías</button>
+        <button type="button" data-q="pareja" aria-pressed="${estFiltro.quien === "pareja"}">${esc(p?.nombre || "Pareja")}</button>
+        <button type="button" data-q="ambos" aria-pressed="${estFiltro.quien === "ambos"}">Comparar</button>
+      </div>
+      <div class="chips" id="es-periodo" style="margin-bottom:14px">${[[7, "7 días"], [30, "30 días"], [90, "3 meses"], [365, "12 meses"]].map(([d, t]) =>
+        `<button type="button" data-p="${d}" aria-pressed="${estFiltro.periodo === d}">${t}</button>`).join("")}</div>
+      <div id="es-cont"><p class="vacio">Calculando…</p></div>`;
+    const ids = estFiltro.quien === "yo" ? [y.id] : estFiltro.quien === "pareja" ? [p.id] : [y.id, p.id];
+    const res = await Promise.all(ids.map((id) => db.rpc("estadisticas", { p_user: id, p_desde: desde, p_hasta: hasta })));
+    if (res.some((r) => r.error)) return avisar(errorLegible(res.find((r) => r.error).error) + ". ¿Ejecutaste fase12.sql?");
+    if (vistaActual !== "estadisticas") return;
+    const datos = res.map((r, i) => ({ ...r.data, persona: ids[i] === y.id ? y : p }));
+    const color = (d) => (d.persona.id === y.id ? (perfil.tema === "azul" ? "#5B8FC7" : "#B5607A") : (perfil.tema === "azul" ? "#B5607A" : "#5B8FC7"));
+    const grupos = datos.map((d) => agrupar(d.dias, grano));
+    const etiquetas = grupos[0].map((g) => etiquetaGrupo(g.clave, grano));
+    const serie = (fn, nombreExtra = "") => datos.map((d, i) => ({ nombre: d.persona.nombre + nombreExtra, color: color(d), valores: grupos[i].map((g) => fn(g.dias)) }));
+    const uno = datos.length === 1 ? datos[0] : null;
+    const tarjetaNum = (t, v, sub = "") => `<div class="stat"><span>${t}</span><strong>${v}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
+    const porPersona = (fn) => datos.map((d) => `<div class="stat-persona"><span class="nombre-${d.persona.id === y.id ? perfil.tema : (perfil.tema === "azul" ? "rosa" : "azul")}">${esc(d.persona.nombre)}</span>${fn(d)}</div>`).join("");
+
+    let html = "";
+    // Competencia
+    const semanas = datos.map((d) => d.semanas || []);
+    if (semanas.some((s) => s.length)) {
+      const todas = [...new Set(semanas.flat().map((s) => s.semana))].sort();
+      html += `<section class="tarjeta"><h3>🏆 Competencia</h3>
+        ${grafico(datos.map((d, i) => ({ nombre: d.persona.nombre, color: color(d), valores: todas.map((w) => semanas[i].find((s) => s.semana === w)?.puntos ?? null) })), todas.map((w) => fmt(w, { day: "numeric", month: "short" })), { unidad: "Puntos por semana cerrada" })}
+        ${porPersona((d) => `<div class="stats">${tarjetaNum("Puntos", d.semanas.reduce((a, s) => a + s.puntos, 0))}${tarjetaNum("Cumplimiento", d.semanas.length ? Math.round(d.semanas.reduce((a, s) => a + Number(s.pct), 0) / d.semanas.length) + " %" : "—")}${tarjetaNum("Faltas", d.semanas.reduce((a, s) => a + s.faltas, 0))}</div>`)}
+      </section>`;
+    }
+    // Ejercicio
+    html += `<section class="tarjeta"><h3>🏋️ Ejercicio</h3>
+      ${grafico(serie((l) => suma(l, "entrenos")), etiquetas, { tipo: "barras", unidad: `Entrenamientos válidos por ${grano === "dia" ? "día" : grano}` })}
+      ${porPersona((d) => { const e = suma(d.dias, "entrenos"), m = suma(d.dias, "minutos"); return `<div class="stats">${tarjetaNum("Entrenamientos", e)}${tarjetaNum("Minutos", m.toLocaleString("es"))}${tarjetaNum("Promedio", e ? Math.round(m / e) + " min" : "—")}${tarjetaNum("Juntos", suma(d.dias, "juntos"))}</div>`; })}
+      ${uno ? `${Object.keys(uno.tipos || {}).length ? `<span class="grupo-titulo" style="margin-top:12px">Por tipo</span>${barrasLista(uno.tipos, TIPO_NOMBRE)}` : ""}
+        ${Object.keys(uno.zonas || {}).length ? `<span class="grupo-titulo" style="margin-top:12px">Zonas trabajadas</span>${barrasLista(uno.zonas, (z) => (ZONAS_CUERPO.find((x) => x[0] === z)?.[1]) || z)}` : ""}
+        ${Object.keys(uno.animos || {}).length ? `<span class="grupo-titulo" style="margin-top:12px">Cómo te sentiste después</span>${barrasLista(uno.animos, (a) => ANIMO_NOMBRE[a] || a)}` : ""}` : ""}
+    </section>`;
+    // Nutrición
+    const conComida = (l) => l.filter((d) => d.comidas > 0);
+    html += `<section class="tarjeta"><h3>🍽️ Alimentación</h3>
+      ${grafico(serie((l) => media(l, "pct")), etiquetas, { min: 0, max: 100, unidad: "% de alimentación saludable" })}
+      ${uno?.privado && uno.dias.some((d) => d.kcal != null) ? `<span class="grupo-titulo" style="margin-top:12px">🔒 Calorías (promedio de días con registro)</span>${grafico(serie((l) => media(conComida(l), "kcal")), etiquetas, { unidad: "kcal por día" })}` : ""}
+      ${datos.some((d) => d.macros) ? `<span class="grupo-titulo" style="margin-top:12px">Proteína promedio</span>${grafico(datos.filter((d) => d.macros).map((d, i) => ({ nombre: d.persona.nombre, color: color(d), valores: agrupar(d.dias, grano).map((g) => media(conComida(g.dias), "proteina")) })), etiquetas, { unidad: "g por día" })}` : ""}
+      ${porPersona((d) => { const cd = conComida(d.dias); return `<div class="stats">${tarjetaNum("Saludable", media(d.dias, "pct") != null ? Math.round(media(d.dias, "pct")) + " %" : "—")}${tarjetaNum("Días con registro", cd.length)}${tarjetaNum("Comidas libres", suma(d.dias, "libres"))}
+        ${d.privado && media(cd, "kcal") != null ? tarjetaNum("🔒 kcal/día", Math.round(media(cd, "kcal"))) : ""}
+        ${d.macros && cd.length ? tarjetaNum("P / C / G", `${Math.round(media(cd, "proteina") || 0)} / ${Math.round(media(cd, "carbohidratos") || 0)} / ${Math.round(media(cd, "grasas") || 0)}`, "g por día") : ""}</div>`; })}
+    </section>`;
+    // Hábitos
+    html += `<section class="tarjeta"><h3>🌙 Hábitos</h3>
+      ${grafico(serie((l) => media(l, "puntaje")), etiquetas, { min: 0, max: 100, unidad: "Puntuación de hábitos" })}
+      <span class="grupo-titulo" style="margin-top:12px">😴 Horas de sueño</span>
+      ${grafico(serie((l) => media(l, "sueno_h")), etiquetas, { unidad: "Horas por noche (las salidas nocturnas neutrales no cuentan)" })}
+      ${porPersona((d) => `<div class="stats">${tarjetaNum("Puntuación", media(d.dias, "puntaje") != null ? Math.round(media(d.dias, "puntaje")) : "—")}${tarjetaNum("Sueño", media(d.dias, "sueno_h") != null ? r1(media(d.dias, "sueno_h")) + " h" : "—")}
+        ${tarjetaNum("Noches en objetivo", (() => { const x = d.dias.filter((z) => z.sueno_puntaje != null); return x.length ? Math.round(100 * x.filter((z) => z.sueno_puntaje >= 1).length / x.length) + " %" : "—"; })())}
+        ${tarjetaNum("Bebidas/semana", r1(suma(d.dias, "bebidas") / Math.max(1, d.dias.length / 7)))}
+        ${tarjetaNum("Agua", media(d.dias, "agua") != null ? Math.round(media(d.dias, "agua")) + " ml" : "—")}
+        ${tarjetaNum("Pasos", media(d.dias, "pasos") != null ? Math.round(media(d.dias, "pasos")).toLocaleString("es") : "—")}</div>`)}
+    </section>`;
+    // Cuerpo y bienestar (solo los propios)
+    const mios = datos.find((d) => d.privado);
+    if (mios && mios.dias.some((d) => d.peso != null)) {
+      const { data: pt } = await db.rpc("pesos_tendencia", { p_dias: estFiltro.periodo });
+      const sp = pt || [];
+      html += `<section class="tarjeta"><h3>⚖️ Peso <span class="privado" style="margin:0">🔒</span></h3>
+        ${grafico([{ nombre: "Pesajes", color: "#B9AEA8", valores: sp.map((x) => x.kg) }, { nombre: "Tendencia", color: "var(--acento)", valores: sp.map((x) => x.tendencia) }], sp.map((x) => fmt(x.fecha, { day: "numeric", month: "short" })), { unidad: "kg" })}
+      </section>`;
+    }
+    if (mios && mios.dias.some((d) => d.animo != null)) {
+      html += `<section class="tarjeta"><h3>💛 Ánimo <span class="privado" style="margin:0">🔒</span></h3>
+        ${grafico([{ nombre: "Ánimo", color: "#E3A72F", valores: agrupar(mios.dias, grano).map((g) => media(g.dias, "animo")) }], etiquetas, { min: 1, max: 5, unidad: "Promedio del check-in (1 = muy mal · 5 = muy bien)" })}
+        <p class="ayuda">Mirar la tendencia ayuda a notar a tiempo una racha baja. Si se mantiene, coméntalo con tu profesional de salud mental.</p>
+      </section>`;
+    }
+    if (mios && mios.dias.some((d) => d.episodios)) {
+      html += `<details class="historial tarjeta"><summary>📓 Registro personal <span class="privado" style="margin:0">🔒</span></summary>
+        ${grafico([{ nombre: "Registros", color: "#9C7B8A", valores: agrupar(mios.dias, grano).map((g) => suma(g.dias, "episodios")) }], etiquetas, { tipo: "barras", unidad: "Registros en el periodo. Son datos para entender patrones, sin juicios." })}
+      </details>`;
+    }
+    if (estFiltro.quien !== "yo") html += `<p class="ayuda">De ${esc(p?.nombre || "tu pareja")} solo ves lo que comparte: nunca sus calorías, peso, ánimo ni registros personales.</p>`;
+    $("es-cont").innerHTML = html;
+  }
+  function barrasLista(obj, nombre) {
+    const l = Object.entries(obj).sort((a, b) => b[1] - a[1]); const max = Math.max(...l.map((x) => x[1]));
+    return `<div class="barras-lista">${l.map(([k, v]) => `<div><span>${esc(nombre(k))}</span><i style="width:${(v / max) * 100}%"></i><strong>${v}</strong></div>`).join("")}</div>`;
+  }
+  $("vista").addEventListener("click", (e) => {
+    const q = e.target.closest("#es-quien [data-q]"); if (q) { estFiltro.quien = q.dataset.q; return vistaEstadisticas(); }
+    const pr = e.target.closest("#es-periodo [data-p]"); if (pr) { estFiltro.periodo = Number(pr.dataset.p); return vistaEstadisticas(); }
+  });
+
+  // ---------- Fichas educativas
+  const FICHAS = [
+    { id: "proteina", e: "🥚", t: "La proteína y tus músculos", x: "La proteína ayuda a reparar y construir músculo después de entrenar y a sentirte saciada. Para personas que entrenan fuerza, muchas guías la sitúan entre 1.2 y 2 g por kg de peso al día. Funciona mejor repartida en 3 o 4 comidas que concentrada en una. Fuentes fáciles: huevos, yogur griego, pollo, pescado, legumbres, tofu y queso fresco." },
+    { id: "fibra", e: "🥦", t: "Fibra: la gran olvidada", x: "La fibra mejora la digestión, ayuda a controlar el azúcar en sangre y te mantiene saciada más tiempo. Se suele recomendar alrededor de 25 a 30 g al día. Está en verduras, frutas con piel, legumbres, avena y cereales integrales. Si comes poca, súbela poco a poco y acompáñala con agua." },
+    { id: "sueno-apetito", e: "😴", t: "Dormir poco da más hambre", x: "Cuando duermes poco cambian las hormonas que regulan el apetito: aumenta el hambre y los antojos de comida muy energética, y baja la recuperación muscular y el ánimo. Dormir lo suficiente es una de las herramientas más potentes para tus metas, tanto como el ejercicio o la comida." },
+    { id: "fuerza-definir", e: "🏋️", t: "Fuerza para verte más definida", x: "Verse 'lean and toned' depende sobre todo de tener músculo. El entrenamiento de fuerza le da al cuerpo una razón para mantenerlo y construirlo, incluso cuando comes algo menos. No te vas a poner 'enorme': construir músculo es lento. Dos o tres sesiones de fuerza por semana marcan una gran diferencia." },
+    { id: "progresion", e: "📈", t: "Progresar sin estancarte", x: "El cuerpo se adapta a lo que le pides, así que para seguir mejorando hay que aumentar el reto poco a poco: una repetición más, un poco más de peso, una serie extra o menos descanso. Cambia una sola cosa a la vez y registra lo que haces para saber cuándo subir." },
+    { id: "pasos", e: "👣", t: "El movimiento de todos los días", x: "Caminar, subir escaleras o moverte en casa suma mucho más gasto de energía en el día que una sola sesión de ejercicio. Aumentar tus pasos es una de las formas más sencillas y sostenibles de cuidar tu salud, y además mejora el ánimo." },
+    { id: "hidratacion", e: "💧", t: "Hidratación", x: "Con calor y ejercicio pierdes más agua de lo que crees, y la deshidratación se siente como cansancio, dolor de cabeza o hambre falsa. Una buena guía práctica: bebe a lo largo del día y fíjate en que la orina sea de color claro. En días de entreno o mucho calor, bebe más." },
+    { id: "alcohol", e: "🍷", t: "Alcohol y recuperación", x: "El alcohol empeora la calidad del sueño aunque te ayude a dormirte, deshidrata y reduce la recuperación muscular después de entrenar. Además aporta calorías que no sacian. No hace falta eliminarlo: dejarlo para momentos especiales y alternarlo con agua ayuda mucho." },
+    { id: "ciclo", e: "🌸", t: "Entrenar con tu ciclo", x: "La energía, la fuerza y el apetito pueden variar a lo largo del ciclo. En los días de más cansancio o molestias, una sesión más suave sigue contando y es mejor que forzar. Escucha a tu cuerpo, hidrátate bien e incluye alimentos con hierro, como legumbres, carne roja magra o espinacas con algo de vitamina C." },
+    { id: "comer-entreno", e: "🍌", t: "Comer antes y después de entrenar", x: "No necesitas entrenar en ayunas. Una comida o snack con carbohidratos y algo de proteína 1 a 3 horas antes te da energía para rendir mejor. Después, una comida con proteína y carbohidratos ayuda a recuperarte. Lo más importante es lo que comes en el día completo." },
+    { id: "azucares", e: "🍬", t: "Azúcares: naturales y añadidos", x: "No todo el azúcar es igual: el de la fruta o los lácteos viene con fibra, agua y nutrientes. Los azúcares añadidos (refrescos, dulces, salsas) son los que conviene moderar. Revisa las etiquetas: muchos productos 'saludables' llevan más azúcar del que parece." },
+    { id: "etiquetas", e: "🏷️", t: "Leer una etiqueta en 30 segundos", x: "Fíjate primero en el tamaño de la porción y compara siempre por 100 g para elegir entre productos. Los ingredientes están ordenados de mayor a menor cantidad: si el azúcar aparece entre los primeros, es un producto muy azucarado. Mira proteína y fibra: cuanto más, más saciante." },
+    { id: "descanso", e: "🛌", t: "El músculo crece descansando", x: "El entrenamiento es el estímulo, pero la mejora ocurre mientras descansas. Los días de descanso, el sueño y una buena alimentación son parte del plan, no una pausa en él. Si te sientes muy cansada, con dolores o sin progreso, quizás necesitas más descanso, no más entrenamiento." },
+    { id: "constancia", e: "🧩", t: "Constancia antes que perfección", x: "Lo que cambia tu cuerpo es lo que haces la mayoría de los días, no un día perfecto ni uno malo. Una comida fuera de plan no arruina nada: la siguiente comida es una nueva oportunidad. Pensar en 'todo o nada' es lo que más hace abandonar." },
+    { id: "estres-comida", e: "🫶", t: "Estrés, emociones y comida", x: "Comer para calmar emociones es muy común y no es un fallo de voluntad. Ayuda notar la emoción antes de comer, tener alternativas que te calmen (caminar, hablar con alguien, una ducha), no saltarte comidas y dormir bien. Si sientes que la comida te controla, un psicólogo o nutricionista especializado puede ayudarte mucho." },
+    { id: "calentar", e: "🔥", t: "Calentar y evitar lesiones", x: "Unos minutos de movilidad y series suaves antes de entrenar preparan músculos y articulaciones. La técnica es más importante que el peso. Un dolor agudo, punzante o que empeora no es 'normal': detente y revísalo. Las agujetas de 1 o 2 días sí son normales." },
+    { id: "cardio-fuerza", e: "🏃‍♀️", t: "Cardio y fuerza: mejor juntos", x: "El cardio cuida el corazón, la resistencia y el ánimo; la fuerza construye músculo, protege huesos y articulaciones y cambia la forma del cuerpo. Combinar los dos en la semana da los mejores resultados para la salud y la estética." },
+    { id: "ejercicio-animo", e: "🌤️", t: "Moverte también cuida tu mente", x: "El ejercicio regular reduce síntomas de ansiedad y depresión y mejora el sueño y la energía. No hace falta una sesión intensa: una caminata al aire libre o una rutina corta ya ayudan. En los días difíciles, lo pequeño cuenta." }
+  ];
+  function hojaFicha(id) {
+    const f = FICHAS.find((x) => x.id === id); if (!f) return;
+    abrirHoja(`<div class="cabecera-vista"><h2 class="titulo" id="hoja-titulo" style="font-size:1.4rem">${f.e} ${esc(f.t)}</h2><button type="button" data-cerrar-hoja>Cerrar</button></div>
+      <p class="coach-texto">${esc(f.x)}</p><p class="ayuda" style="margin-top:14px">Información general, no sustituye el consejo de un profesional de salud.</p>`);
+  }
+  function vistaAprende() {
+    vistaActual = "aprende";
+    $("vista").innerHTML = `<div class="cabecera-vista"><h2 class="titulo">📚 Aprende</h2><button type="button" data-ir="mas">Volver</button></div>
+      <p class="sub">Fichas cortas sobre entrenamiento, alimentación y hábitos. El coach te recomienda una cada día.</p>
+      <div class="lista">${FICHAS.map((f) => `<button type="button" class="item" data-ficha="${f.id}" style="grid-template-columns:40px minmax(0,1fr) auto;min-height:0">
+        <span style="font-size:1.6rem">${f.e}</span><span><strong>${esc(f.t)}</strong></span><span class="lado">›</span></button>`).join("")}</div>`;
+  }
+  $("vista").addEventListener("click", (e) => { const f = e.target.closest("[data-ficha]"); if (f) hojaFicha(f.dataset.ficha); });
+  $("hoja").addEventListener("click", (e) => { const f = e.target.closest("[data-ficha]"); if (f) hojaFicha(f.dataset.ficha); });
+
+  // ---------- Acción del día (Inicio)
+  async function cargarAccionDia(renovar = false) {
+    const cont = $("accion-dia"); if (!cont || !perfil.coach_activo) return;
+    cont.innerHTML = `<section class="tarjeta accion-dia"><h3>🤖 Tu acción de hoy</h3><p class="ayuda">El coach está preparando tu día…</p></section>`;
+    try {
+      const { contenido: c } = await llamarCoach({ accion: "diario", fecha: yo().hoy, renovar, fichas: FICHAS.map((f) => ({ id: f.id, titulo: f.t })) });
+      if (!c || !$("accion-dia")) { if ($("accion-dia")) $("accion-dia").innerHTML = ""; return; }
+      const ficha = FICHAS.find((f) => f.id === c.ficha_id);
+      $("accion-dia").innerHTML = `<section class="tarjeta accion-dia">
+        <div class="nutri-cab"><h3 style="margin:0">🤖 Tu acción de hoy</h3><button type="button" class="enlace" data-accion-renovar style="width:auto;min-height:0;padding:0;font-size:.85rem">Otra idea</button></div>
+        <p style="margin-top:8px">${esc(c.accion)}</p>
+        ${c.ejercicio ? `<div class="sugerencia"><strong>${c.toca_entrenar ? "🏋️ Entrenamiento sugerido" : "🧘 Si te apetece moverte"}:</strong> ${esc(c.ejercicio.tipo)}${c.ejercicio.duracion_min ? ` · ${c.ejercicio.duracion_min} min` : ""}<br><span class="ayuda" style="margin:0">${esc(c.ejercicio.detalle || "")}</span></div>` : ""}
+        ${c.subir_nivel ? `<div class="sugerencia subir"><strong>🚀 ¿Lista para subir de nivel?</strong><br>${esc(c.subir_nivel)}<button type="button" class="secundario" data-ir="metas" style="margin-top:10px">Ajustar mis metas</button></div>` : ""}
+        ${ficha ? `<button type="button" class="secundario" data-ficha="${ficha.id}" style="margin-top:10px">${ficha.e} Lee: ${esc(ficha.t)}</button>` : ""}
+      </section>`;
+    } catch (_) { if ($("accion-dia")) $("accion-dia").innerHTML = ""; }
+  }
+  $("vista").addEventListener("click", (e) => { if (e.target.closest("[data-accion-renovar]")) cargarAccionDia(true); });
 
   // ================================================================ SENSACIÓN DE APP NATIVA
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) =>
