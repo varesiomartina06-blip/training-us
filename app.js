@@ -1213,7 +1213,7 @@
 
   async function verEntreno(id) {
     const { data: e, error } = await db.from("entrenos")
-      .select("*, evidencias(ruta), rutinas_youtube(video_id, titulo), entrenos_privado(kcal_est), disputas(*)").eq("id", id).single();
+      .select("*, evidencias(ruta, archivada), rutinas_youtube(video_id, titulo), entrenos_privado(kcal_est), disputas(*)").eq("id", id).single();
     if (error) return avisar(errorLegible(error));
     const urls = await urlsFirmadas(e.evidencias.map((x) => x.ruta));
     const esMio = e.user_id === usuario.id;
@@ -1228,7 +1228,7 @@
       ${e.juntos === "confirmado" ? `<span class="etiqueta">💞 Entrenaron juntos</span>` : e.juntos === "pendiente" ? `<span class="etiqueta">Juntos: por confirmar</span>` : e.juntos === "rechazado" ? `<span class="etiqueta">Juntos: no confirmado</span>` : ""}
       ${e.recuperacion ? `<span class="etiqueta">En recuperación de ${e.recuperacion === "lesion" ? "una lesión" : "una enfermedad"}</span>` : ""}
       ${e.duracion_min < MIN_VALIDO ? `<span class="etiqueta etiqueta-aviso">No cuenta para la meta: menos de ${MIN_VALIDO} min</span>` : ""}
-      <div class="galeria">${e.evidencias.map((x) => urls[x.ruta] ? `<img src="${urls[x.ruta]}" alt="Evidencia">` : "").join("")}</div>
+      <div class="galeria">${e.evidencias.map((x) => urls[x.ruta] ? `<img src="${urls[x.ruta]}" alt="Evidencia">` : x.archivada ? `<div class="foto-archivada">📦 Foto archivada en Google Drive</div>` : "").join("")}</div>
       ${e.animo ? `<section class="tarjeta"><h3>${ANIMO[e.animo].emoji} ${ANIMO[e.animo].nombre}</h3>${e.animo_nota ? `<p>${esc(e.animo_nota)}</p>` : ""}</section>` : ""}
       ${e.rutinas_youtube ? `<section class="tarjeta"><div class="yt"><img src="${miniaturaYoutube(e.rutinas_youtube.video_id)}" alt=""><div><strong>${esc(e.rutinas_youtube.titulo || "Rutina de YouTube")}</strong>
         <div class="acciones-fila"><a href="${enlaceYoutube(e.rutinas_youtube.video_id)}" target="_blank" rel="noopener">▶ Abrir</a></div></div></div></section>` : ""}
@@ -3406,6 +3406,7 @@
     $("vista").innerHTML = `
       <div class="cabecera-vista"><h2 class="titulo">📤 Exportar</h2><button type="button" data-ir="mas">Volver</button></div>
       <p class="sub">Tus datos son tuyos: descárgalos cuando quieras. Solo se exportan tus propios registros.</p>
+      <p class="ayuda" id="ex-respaldo"></p>
       <section class="tarjeta"><h3>Datos (CSV para Excel o Numbers)</h3>
         <div class="botones-lista" style="margin-top:12px">
           <button type="button" class="secundario" data-exp="comidas">🍽️ Comidas y alimentos</button>
@@ -3417,6 +3418,14 @@
         <label for="ex-mes">Mes</label><select id="ex-mes" class="campo">${[0, -1, -2].map((i) => sumarMeses(mes, i)).map((m) => `<option value="${m}">${nombreMes(m)}</option>`).join("")}</select>
         <button type="button" class="boton-principal" data-exp="reporte">Ver reporte</button>
         <p class="ayuda">En el reporte toca <strong>Imprimir / Guardar PDF</strong> y en el iPhone elige "Guardar en Archivos".</p></section>`;
+    mostrarUltimoRespaldo();
+  }
+  async function mostrarUltimoRespaldo() {
+    const { data } = await db.from("ajustes").select("valor").eq("clave", "ultimo_respaldo").maybeSingle();
+    if (!$("ex-respaldo")) return;
+    const v = data?.valor;
+    $("ex-respaldo").textContent = v ? `☁️ Último respaldo automático en Google Drive: ${new Date(v).toLocaleString("es", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}.`
+      : "☁️ El respaldo automático en Google Drive aún no se ha ejecutado.";
   }
   async function exportar(tipo) {
     try {

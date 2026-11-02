@@ -483,3 +483,5 @@ body:not(.con-pestanas) .mensaje { bottom: calc(env(safe-area-inset-bottom) + 20
 .tarjeta.accion-dia { border-color: var(--acento); }
 .sugerencia { background: var(--fondo); border-radius: 12px; padding: 10px 12px; margin-top: 10px; font-size: .92rem; line-height: 1.45; }
 .sugerencia.subir { background: #FFF4D9; }
+
+.foto-archivada { display: grid; place-items: center; min-height: 140px; border-radius: 14px; background: var(--fondo); color: var(--texto-suave); font-size: .9rem; text-align: center; padding: 12px; border: 1px dashed var(--borde); }
